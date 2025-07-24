@@ -1,17 +1,19 @@
 {
-  "name": "ak-audit",
-  "version": "1.0.0",
-  "main": "index.js",
-  "type": "module",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-	"prune": "rm -rf ./output/*"
-  },
-  "keywords": [],
-  "author": "ak@mixpanel.com",
-  "license": "ISC",
-  "description": "audit data warehouse tables",
-  "dependencies": {
-    "@google-cloud/bigquery": "^8.1.1"
-  }
+	"name": "ak-audit",
+	"version": "1.0.0",
+	"main": "index.js",
+	"type": "module",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"prune": "rm -rf ./output/*",
+		"serve": "npx serve ./output"
+	},
+	"keywords": [],
+	"author": "ak@mixpanel.com",
+	"license": "ISC",
+	"description": "audit data warehouse tables",
+	"dependencies": {
+		"@google-cloud/bigquery": "^8.1.1",
+		"google-auth-library": "^9.0.0"
+	}
 }

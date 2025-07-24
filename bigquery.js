@@ -15,7 +15,8 @@ const config = {
 	datasetId: process.argv[3] || 'warehouse_connectors',
 	location: process.argv[4] || 'US',
 	outputDir: process.argv[5] || './output',
-	sampleLimit: parseInt(process.argv[6]) || 10 // New: Number of sample records to fetch per table
+	sampleLimit: parseInt(process.argv[6]) || 10,
+	tableFilter: process.argv[7] ? process.argv[7].split(',').map(t => t.trim()) : null // Comma-separated list of specific tables to audit
 };
 
 
@@ -25,12 +26,20 @@ console.log(`Running BigQuery Audit with configuration:
   - Location: ${config.location}
   - Output Directory: ${config.outputDir}
   - Sample Limit: ${config.sampleLimit}
-\n\n`);	
+  - Table Filter: ${config.tableFilter ? config.tableFilter.join(', ') : 'All tables'}
+\n`);	
 
 
 const bigquery = new BigQuery({
 	projectId: config.projectId,
 	location: config.location,
+});
+
+// Import required modules for REST API fallback
+import https from 'https';
+import { GoogleAuth } from 'google-auth-library';
+const auth = new GoogleAuth({
+	scopes: ['https://www.googleapis.com/auth/bigquery']
 });
 
 // --- Colors for Terminal Output ---
@@ -61,6 +70,35 @@ const jsonEscape = (str) => {
 	return str.replace(/\\/g, '\\\\').replace(/"/g, '\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
 };
 
+// Parse view definitions to extract table dependencies
+const parseViewDependencies = (ddl, datasetId) => {
+	if (!ddl || typeof ddl !== 'string') return [];
+	
+	const dependencies = new Set();
+	
+	// Common patterns for table references in BigQuery DDL
+	const patterns = [
+		// `dataset.table` or `project.dataset.table`
+		/`[^`]*\.${datasetId}\.(\w+)`/gi,
+		// dataset.table without backticks (less reliable but common)
+		new RegExp(`\\b${datasetId}\\.(\\w+)\\b`, 'gi'),
+		// FROM or JOIN clauses with table names
+		/FROM\s+`?[^`\s]*\.?${datasetId}\.(\w+)`?/gi,
+		/JOIN\s+`?[^`\s]*\.?${datasetId}\.(\w+)`?/gi
+	];
+	
+	patterns.forEach(pattern => {
+		let match;
+		while ((match = pattern.exec(ddl)) !== null) {
+			if (match[1] && match[1].toLowerCase() !== 'information_schema') {
+				dependencies.add(match[1]);
+			}
+		}
+	});
+	
+	return Array.from(dependencies);
+};
+
 const csvEscape = (str) => {
 	if (str === null || str === undefined) return '';
 	const s = String(str);
@@ -80,7 +118,63 @@ async function testBigQueryAuth() {
 		if (NODE_ENV === "dev") debugger;
 		console.error(`${colors.red}Fatal Error: BigQuery authentication or connectivity failed. Please check your Google Cloud credentials and network access.${colors.nc}`);
 		console.error(error.message);
+		console.error(`\n${colors.yellow}Try running these commands to set up proper permissions:${colors.nc}`);
+		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
+		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
+		console.error(`${colors.cyan}  --role='roles/bigquery.jobUser'${colors.nc}`);
+		console.error(`\n${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
+		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
+		console.error(`${colors.cyan}  --role='roles/bigquery.dataViewer'${colors.nc}`);
 		process.exit(1);
+	}
+}
+
+// REST API fallback for sample data when query access is denied
+async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults = 10) {
+	try {
+		const authClient = await auth.getClient();
+		const accessToken = await authClient.getAccessToken();
+		
+		const url = `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables/${tableName}/data?maxResults=${maxResults}`;
+		
+		return new Promise((resolve, reject) => {
+			const options = {
+				headers: {
+					'Authorization': `Bearer ${accessToken.token}`,
+					'Content-Type': 'application/json'
+				}
+			};
+			
+			https.get(url, options, (res) => {
+				let data = '';
+				res.on('data', chunk => data += chunk);
+				res.on('end', () => {
+					try {
+						const response = JSON.parse(data);
+						if (response.rows) {
+							// Convert BigQuery REST API format to standard row format
+							const schema = response.schema?.fields || [];
+							const rows = response.rows.map(row => {
+								const obj = {};
+								row.f.forEach((field, index) => {
+									if (schema[index]) {
+										obj[schema[index].name] = field.v;
+									}
+								});
+								return obj;
+							});
+							resolve(rows);
+						} else {
+							resolve([]);
+						}
+					} catch (parseError) {
+						reject(parseError);
+					}
+				});
+			}).on('error', reject);
+		});
+	} catch (error) {
+		throw error;
 	}
 }
 
@@ -95,13 +189,16 @@ async function runAudit() {
 	console.log('-------------------------------------------\n');
 
 	try {
-		console.log(`${colors.yellow}Clearing previous output directory: ${config.outputDir}${colors.nc}`);
+		console.log(`${colors.yellow}Setting up output directory structure...${colors.nc}`);
 		await fs.rm(config.outputDir, { recursive: true, force: true });
 		await fs.mkdir(path.join(config.outputDir, 'schemas'), { recursive: true });
 		await fs.mkdir(path.join(config.outputDir, 'samples'), { recursive: true });
 		await fs.mkdir(path.join(config.outputDir, 'reports'), { recursive: true });
 		
-		console.log(`${colors.green}✓ Output directory recreated successfully.${colors.nc}\n`);
+		console.log(`${colors.green}✓ Output directories created:${colors.nc}`);
+		console.log(`  - ${path.join(config.outputDir, 'reports')} (aggregated reports)`);
+		console.log(`  - ${path.join(config.outputDir, 'schemas')} (individual table schemas)`);
+		console.log(`  - ${path.join(config.outputDir, 'samples')} (sample data files)\\n`);
 	} catch (error) {
 		console.error(`${colors.red}Fatal Error: Could not manage output directory. ${error.message}${colors.nc}`);
 		process.exit(1);
@@ -116,23 +213,73 @@ async function runAudit() {
 		total_rows_accessible: 0
 	};
 
-	// CSV Headers
-	const allTablesSummaryCsv = ['table_name', 'table_type', 'row_count', 'column_count', 'creation_time', 'has_permission_error', 'error_details'];
-	const allSchemasCatalogCsv = ['table_name', 'column_name', 'data_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position'];
+	// CSV Headers - updated to include join key detection
+	const allTablesSummaryCsv = ['table_name', 'table_type', 'row_count', 'column_count', 'size_mb', 'num_partitions', 'creation_time', 'has_permission_error', 'error_details'];
+	const allSchemasCatalogCsv = ['table_name', 'column_name', 'nested_field_path', 'nested_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position', 'is_potential_join_key'];
 	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_tables_summary.csv'), allTablesSummaryCsv.join(',') + '\n');
 	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv'), allSchemasCatalogCsv.join(',') + '\n');
 
 	try {
 		console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
-		const tablesQuery = `
-            SELECT table_name, table_type, FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', creation_time, 'UTC') as creation_time, ddl
+		let tablesQuery = `
+            SELECT 
+                table_name, 
+                table_type, 
+                FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', creation_time, 'UTC') as creation_time, 
+                ddl
             FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.TABLES\`
-            WHERE table_schema = '${config.datasetId}'
-            ORDER BY table_type, table_name`;
+            WHERE table_schema = '${config.datasetId}'`;
+		
+		// Add table filtering if specified
+		if (config.tableFilter && config.tableFilter.length > 0) {
+			const tableList = config.tableFilter.map(t => `'${t}'`).join(',');
+			tablesQuery += ` AND table_name IN (${tableList})`;
+		}
+		
+		tablesQuery += ` ORDER BY table_type, table_name`;
 
 		const [tables] = await bigquery.query({ query: tablesQuery, location: config.location });
 
-		console.log(`${colors.green}✓ Found ${tables.length} objects to audit.\n`);
+		if (config.tableFilter && config.tableFilter.length > 0) {
+			console.log(`${colors.green}✓ Found ${tables.length} objects to audit (filtered from ${config.tableFilter.length} requested tables).\n`);
+		} else {
+			console.log(`${colors.green}✓ Found ${tables.length} objects to audit.\n`);
+		}
+
+		// First pass: collect all field names across tables for join key detection
+		console.log(`${colors.yellow}Analyzing schemas for join key detection...${colors.nc}`);
+		const allFieldNames = new Map(); // field_name -> Set of table names that have this field
+		
+		for (const table of tables) {
+			try {
+				const schemaQuery = `
+                    SELECT column_name, field_path, data_type
+                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\`
+                    WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'`;
+				const [schema] = await bigquery.query({ query: schemaQuery, location: config.location });
+				
+				for (const field of schema) {
+					const fieldName = field.column_name;
+					if (!allFieldNames.has(fieldName)) {
+						allFieldNames.set(fieldName, new Set());
+					}
+					allFieldNames.get(fieldName).add(table.table_name);
+				}
+			} catch (error) {
+				// Skip if schema access fails, we'll handle this in the main loop
+				console.log(`${colors.yellow}  └ ⚠ Skipping schema analysis for '${table.table_name}' due to permissions${colors.nc}`);
+			}
+		}
+		
+		// Identify potential join keys (fields that appear in multiple tables)
+		const potentialJoinKeys = new Set();
+		for (const [fieldName, tableSet] of allFieldNames.entries()) {
+			if (tableSet.size > 1) {
+				potentialJoinKeys.add(fieldName);
+			}
+		}
+		
+		console.log(`${colors.green}✓ Found ${potentialJoinKeys.size} potential join keys across ${tables.length} tables.\n`);
 
 		let currentObject = 0;
 		for (const table of tables) {
@@ -143,40 +290,84 @@ async function runAudit() {
 				table_name: table.table_name,
 				table_type: table.table_type,
 				creation_time: table.creation_time,
+				size_mb: 0,
+				num_rows_metadata: 0,
 				has_permission_error: false,
 				error_details: []
 			};
 
-			// 1. Get Schema
+			// 0.5. Get table size information (only for BASE TABLE types)
+			if (table.table_type === 'BASE TABLE') {
+				try {
+					const sizeQuery = `
+						SELECT 
+							ROUND(size_bytes / 1024 / 1024, 2) as size_mb,
+							row_count
+						FROM \`${config.projectId}.${config.datasetId}.__TABLES__\`
+						WHERE table_id = '${table.table_name}'`;
+					const [sizeResult] = await bigquery.query({ query: sizeQuery, location: config.location });
+					if (sizeResult && sizeResult.length > 0) {
+						tableData.size_mb = sizeResult[0].size_mb || 0;
+						tableData.num_rows_metadata = sizeResult[0].row_count || 0;
+					}
+				} catch (e) {
+					// Size information is not critical, just log and continue
+					console.log(`${colors.yellow}  └ ⚠ Could not get size info for '${table.table_name}'${colors.nc}`);
+				}
+			}
+
+			// 1. Get Schema using COLUMN_FIELD_PATHS for nested/repeated field support
 			let column_count = 0;
 			try {
 				const schemaQuery = `
-                    SELECT column_name, data_type, is_nullable, is_partitioning_column, clustering_ordinal_position
-                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMNS\`
-                    WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'
-                    ORDER BY ordinal_position`;
+                    SELECT 
+                        cfp.column_name, 
+                        cfp.field_path AS nested_field_path,
+                        cfp.data_type AS nested_type,
+                        COALESCE(c.is_nullable, 'YES') as is_nullable,
+                        COALESCE(c.is_partitioning_column, 'NO') as is_partitioning_column,
+                        c.clustering_ordinal_position
+                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
+                    LEFT JOIN \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMNS\` c
+                      ON cfp.table_catalog = c.table_catalog 
+                      AND cfp.table_schema = c.table_schema 
+                      AND cfp.table_name = c.table_name 
+                      AND cfp.column_name = c.column_name
+                    WHERE cfp.table_name = '${table.table_name}' AND cfp.table_schema = '${config.datasetId}'
+                    ORDER BY cfp.field_path`;
 				const [schema] = await bigquery.query({ query: schemaQuery, location: config.location });
-				tableData.schema = schema;
+				
+				// Add join key detection to schema
+				const schemaWithJoinKeys = schema.map(col => ({
+					...col,
+					is_potential_join_key: potentialJoinKeys.has(col.column_name)
+				}));
+				
+				tableData.schema = schemaWithJoinKeys;
 				column_count = schema.length;
 
-				const schemaCsvHeader = ['column_name', 'data_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position'];
-				const schemaCsvRowsForTable = schema.map(col => [
+				const schemaCsvHeader = ['column_name', 'nested_field_path', 'nested_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position', 'is_potential_join_key'];
+				const schemaCsvRowsForTable = schemaWithJoinKeys.map(col => [
 					csvEscape(col.column_name),
-					csvEscape(col.data_type),
+					csvEscape(col.nested_field_path),
+					csvEscape(col.nested_type),
 					csvEscape(col.is_nullable),
 					csvEscape(col.is_partitioning_column),
-					csvEscape(col.clustering_ordinal_position)
+					csvEscape(col.clustering_ordinal_position),
+					csvEscape(col.is_potential_join_key)
 				].join(','));
 				await fs.writeFile(path.join(config.outputDir, 'schemas', `${table.table_name}.csv`), schemaCsvHeader.join(',') + '\n' + schemaCsvRowsForTable.join('\n') + '\n');
 
 				// Append to aggregated schema catalog
-				const schemaCsvRowsForCatalog = schema.map(col => [
+				const schemaCsvRowsForCatalog = schemaWithJoinKeys.map(col => [
 					csvEscape(table.table_name),
 					csvEscape(col.column_name),
-					csvEscape(col.data_type),
+					csvEscape(col.nested_field_path),
+					csvEscape(col.nested_type),
 					csvEscape(col.is_nullable),
 					csvEscape(col.is_partitioning_column),
-					csvEscape(col.clustering_ordinal_position)
+					csvEscape(col.clustering_ordinal_position),
+					csvEscape(col.is_potential_join_key)
 				].join(','));
 				await fs.appendFile(path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv'), schemaCsvRowsForCatalog.join('\n') + '\n');
 
@@ -186,6 +377,29 @@ async function runAudit() {
 				tableData.schema = [];
 				tableData.schema_error = jsonEscape(e.message);
 				console.log(`${colors.yellow}  └ ⚠ Schema access failed. ${e.message}${colors.nc}`);
+			}
+
+			// 1.5. Get Partition and Clustering Information
+			try {
+				const partitionQuery = `
+					SELECT 
+						partition_id,
+						total_rows,
+						total_logical_bytes,
+						last_modified_time
+					FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.PARTITIONS_SUMMARY\`
+					WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'
+					ORDER BY partition_id
+					LIMIT 10`;  // Limit to first 10 partitions for performance
+				const [partitions] = await bigquery.query({ query: partitionQuery, location: config.location });
+				tableData.partition_info = partitions;
+				
+				if (partitions && partitions.length > 0) {
+					console.log(`${colors.green}  └ ✓ Found ${partitions.length} partitions${colors.nc}`);
+				}
+			} catch (e) {
+				// This is not critical, tables might not be partitioned
+				tableData.partition_info = [];
 			}
 
 			// 2. Get Row Count
@@ -204,23 +418,36 @@ async function runAudit() {
 				console.log(`${colors.yellow}  └ ⚠ Row count failed. ${e.message}${colors.nc}`);
 			}
 
-			// 3. Get Sample Data
+			// 3. Get Sample Data with REST API fallback
 			try {
 				const sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT ${config.sampleLimit}`;
 				const [sampleData] = await bigquery.query({ query: sampleQuery, location: config.location });
+				tableData.sample_data = sampleData;
 				await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleData, null, 2));
+				console.log(`${colors.green}  └ ✓ Sample data retrieved via query (${sampleData.length} rows)${colors.nc}`);
 			} catch (e) {
-				tableData.has_permission_error = true;
-				tableData.error_details.push('Sample Data');
-				tableData.sample_data = [];
-				tableData.sample_data_error = jsonEscape(e.message);
-				console.log(`${colors.yellow}  └ ⚠ Sample data failed. ${e.message}${colors.nc}`);
+				console.log(`${colors.yellow}  └ ⚠ Query failed for sample data, trying REST API fallback...${colors.nc}`);
+				try {
+					// Try REST API fallback for sample data
+					const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, config.sampleLimit);
+					tableData.sample_data = sampleDataRest;
+					await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleDataRest, null, 2));
+					console.log(`${colors.green}  └ ✓ Sample data retrieved via REST API (${sampleDataRest.length} rows)${colors.nc}`);
+				} catch (restError) {
+					tableData.has_permission_error = true;
+					tableData.error_details.push('Sample Data');
+					tableData.sample_data = [];
+					tableData.sample_data_error = jsonEscape(e.message + '; REST fallback: ' + restError.message);
+					console.log(`${colors.yellow}  └ ⚠ Both query and REST API failed for sample data. ${restError.message}${colors.nc}`);
+				}
 			}
 
-			// 4. Get View Definition
+			// 4. Get View Definition and Dependencies
             if (table.table_type === 'VIEW') {
                 tableData.view_definition = jsonEscape(table.ddl);
+                tableData.dependencies = parseViewDependencies(table.ddl, config.datasetId);
                 auditSummary.total_views++;
+                console.log(`${colors.green}  └ ✓ Found ${tableData.dependencies.length} table dependencies${colors.nc}`);
             } else {
                 auditSummary.total_tables++;
             }
@@ -240,16 +467,93 @@ async function runAudit() {
                 csvEscape(tableData.table_type),
                 row_count,
                 column_count,
+                tableData.size_mb || 0,
+                (tableData.partition_info && tableData.partition_info.length) || 0,
                 csvEscape(tableData.creation_time),
                 tableData.has_permission_error,
                 csvEscape(tableData.error_details.join('; '))
             ].join(',');
-            await fs.appendFile(path.join(config.outputDir, 'all_tables_summary.csv'), summaryRow + '\n');
+            await fs.appendFile(path.join(config.outputDir, 'reports', 'all_tables_summary.csv'), summaryRow + '\n');
             }
 
             
 
             
+        // Build enhanced ERD/lineage graph
+        console.log(`\n${colors.yellow}Building ERD and data lineage graph...${colors.nc}`);
+        const lineageGraph = {
+            nodes: allTables.map(table => ({
+                id: table.table_name,
+                type: table.table_type,
+                row_count: table.row_count || 0,
+                size_mb: table.size_mb || 0,
+                join_keys: (table.schema || [])
+                    .filter(col => col.is_potential_join_key)
+                    .map(col => col.column_name)
+            })),
+            edges: []
+        };
+        
+        // Add edges based on view dependencies
+        allTables.forEach(table => {
+            if (table.table_type === 'VIEW' && table.dependencies) {
+                table.dependencies.forEach(dependency => {
+                    // Only add edge if the dependency exists in our dataset
+                    if (allTables.some(t => t.table_name === dependency)) {
+                        lineageGraph.edges.push({
+                            source: dependency,
+                            target: table.table_name,
+                            type: 'view_dependency',
+                            label: 'feeds into'
+                        });
+                    }
+                });
+            }
+        });
+        
+        // Add edges based on shared join keys (potential relationships)
+        const joinKeyRelationships = new Map();
+        
+        // Build map of join keys to tables
+        allTables.forEach(table => {
+            (table.schema || []).forEach(col => {
+                if (col.is_potential_join_key) {
+                    if (!joinKeyRelationships.has(col.column_name)) {
+                        joinKeyRelationships.set(col.column_name, []);
+                    }
+                    joinKeyRelationships.get(col.column_name).push(table.table_name);
+                }
+            });
+        });
+        
+        // Create edges between tables that share join keys
+        joinKeyRelationships.forEach((tables, joinKey) => {
+            if (tables.length > 1) {
+                // Create relationships between all pairs of tables sharing this key
+                for (let i = 0; i < tables.length; i++) {
+                    for (let j = i + 1; j < tables.length; j++) {
+                        // Avoid duplicate edges with view dependencies
+                        const hasViewDep = lineageGraph.edges.some(edge => 
+                            (edge.source === tables[i] && edge.target === tables[j]) ||
+                            (edge.source === tables[j] && edge.target === tables[i])
+                        );
+                        
+                        if (!hasViewDep) {
+                            lineageGraph.edges.push({
+                                source: tables[i],
+                                target: tables[j],
+                                type: 'join_key',
+                                label: joinKey,
+                                bidirectional: true
+                            });
+                        }
+                    }
+                }
+            }
+        });
+        
+        console.log(`${colors.green}✓ Built ERD with ${lineageGraph.nodes.length} nodes and ${lineageGraph.edges.length} relationships (${lineageGraph.edges.filter(e => e.type === 'view_dependency').length} view dependencies, ${lineageGraph.edges.filter(e => e.type === 'join_key').length} join key relationships).${colors.nc}`);
+
         // Finalize JSON
         const finalJson = {
             audit_metadata: {
@@ -259,6 +563,7 @@ async function runAudit() {
                 region: config.location
             },
             tables: allTables,
+            lineage: lineageGraph,
             summary: { ...auditSummary, total_objects: tables.length }
         };
         await fs.writeFile(path.join(config.outputDir, 'reports', 'dataset_audit.json'), JSON.stringify(finalJson, null, 2));
@@ -289,8 +594,15 @@ async function runAudit() {
         console.log('==========================================');
 
 	} catch (error) {
-		console.error(`\n${colors.red}Fatal Error: Could not fetch table list. Check permissions or dataset existence.${colors.nc}`);
+		console.error(`\n${colors.red}Fatal Error: Could not fetch table list from INFORMATION_SCHEMA. Check permissions or dataset existence.${colors.nc}`);
 		console.error(error.message);
+		console.error(`\n${colors.yellow}Try running these commands to set up proper permissions:${colors.nc}`);
+		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
+		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
+		console.error(`${colors.cyan}  --role='roles/bigquery.jobUser'${colors.nc}`);
+		console.error(`\n${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
+		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
+		console.error(`${colors.cyan}  --role='roles/bigquery.dataViewer'${colors.nc}`);
 		process.exit(1);
 	}
 }
