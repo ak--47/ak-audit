@@ -3,3 +3,4 @@ output/*
 !output/.gitkeep
 .vscode
 .DS_Store
+CLAUDE.md

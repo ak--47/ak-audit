@@ -3,6 +3,7 @@
 import { BigQuery } from '@google-cloud/bigquery';
 import { promises as fs } from 'fs';
 import  generateHtmlReport from './buildReport.js';
+
 import path from 'path';
 let { NODE_ENV = 'production' } = process.env;
 
@@ -13,9 +14,18 @@ const config = {
 	projectId: process.argv[2] || 'mixpanel-gtm-training',
 	datasetId: process.argv[3] || 'warehouse_connectors',
 	location: process.argv[4] || 'US',
-	outputDir: process.argv[5] || './output'
+	outputDir: process.argv[5] || './output',
+	sampleLimit: parseInt(process.argv[6]) || 10 // New: Number of sample records to fetch per table
 };
 
+
+console.log(`Running BigQuery Audit with configuration:
+  - Project ID: ${config.projectId}
+  - Dataset ID: ${config.datasetId}
+  - Location: ${config.location}
+  - Output Directory: ${config.outputDir}
+  - Sample Limit: ${config.sampleLimit}
+\n\n`);	
 
 
 const bigquery = new BigQuery({
@@ -90,6 +100,7 @@ async function runAudit() {
 		await fs.mkdir(path.join(config.outputDir, 'schemas'), { recursive: true });
 		await fs.mkdir(path.join(config.outputDir, 'samples'), { recursive: true });
 		await fs.mkdir(path.join(config.outputDir, 'reports'), { recursive: true });
+		
 		console.log(`${colors.green}✓ Output directory recreated successfully.${colors.nc}\n`);
 	} catch (error) {
 		console.error(`${colors.red}Fatal Error: Could not manage output directory. ${error.message}${colors.nc}`);
@@ -107,9 +118,9 @@ async function runAudit() {
 
 	// CSV Headers
 	const allTablesSummaryCsv = ['table_name', 'table_type', 'row_count', 'column_count', 'creation_time', 'has_permission_error', 'error_details'];
-	const allSchemasCatalogCsv = ['table_name', 'column_name', 'field_path', 'data_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position'];
-	await fs.writeFile(path.join(config.outputDir, 'all_tables_summary.csv'), allTablesSummaryCsv.join(',') + '\n');
-	await fs.writeFile(path.join(config.outputDir, 'all_schemas_catalog.csv'), allSchemasCatalogCsv.join(',') + '\n');
+	const allSchemasCatalogCsv = ['table_name', 'column_name', 'data_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position'];
+	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_tables_summary.csv'), allTablesSummaryCsv.join(',') + '\n');
+	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv'), allSchemasCatalogCsv.join(',') + '\n');
 
 	try {
 		console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
@@ -148,7 +159,18 @@ async function runAudit() {
 				tableData.schema = schema;
 				column_count = schema.length;
 
-				const schemaCsvRows = schema.map(col => [
+				const schemaCsvHeader = ['column_name', 'data_type', 'is_nullable', 'is_partitioning_column', 'clustering_ordinal_position'];
+				const schemaCsvRowsForTable = schema.map(col => [
+					csvEscape(col.column_name),
+					csvEscape(col.data_type),
+					csvEscape(col.is_nullable),
+					csvEscape(col.is_partitioning_column),
+					csvEscape(col.clustering_ordinal_position)
+				].join(','));
+				await fs.writeFile(path.join(config.outputDir, 'schemas', `${table.table_name}.csv`), schemaCsvHeader.join(',') + '\n' + schemaCsvRowsForTable.join('\n') + '\n');
+
+				// Append to aggregated schema catalog
+				const schemaCsvRowsForCatalog = schema.map(col => [
 					csvEscape(table.table_name),
 					csvEscape(col.column_name),
 					csvEscape(col.data_type),
@@ -156,7 +178,7 @@ async function runAudit() {
 					csvEscape(col.is_partitioning_column),
 					csvEscape(col.clustering_ordinal_position)
 				].join(','));
-				await fs.appendFile(path.join(config.outputDir, 'all_schemas_catalog.csv'), schemaCsvRows.join('\n') + '\n');
+				await fs.appendFile(path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv'), schemaCsvRowsForCatalog.join('\n') + '\n');
 
 			} catch (e) {
 				tableData.has_permission_error = true;
@@ -184,9 +206,9 @@ async function runAudit() {
 
 			// 3. Get Sample Data
 			try {
-				const sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT 10`;
+				const sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT ${config.sampleLimit}`;
 				const [sampleData] = await bigquery.query({ query: sampleQuery, location: config.location });
-				tableData.sample_data = sampleData;
+				await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleData, null, 2));
 			} catch (e) {
 				tableData.has_permission_error = true;
 				tableData.error_details.push('Sample Data');
@@ -196,72 +218,75 @@ async function runAudit() {
 			}
 
 			// 4. Get View Definition
-			if (table.table_type === 'VIEW') {
-				tableData.view_definition = jsonEscape(table.ddl);
-				auditSummary.total_views++;
-			} else {
-				auditSummary.total_tables++;
-			}
+            if (table.table_type === 'VIEW') {
+                tableData.view_definition = jsonEscape(table.ddl);
+                auditSummary.total_views++;
+            } else {
+                auditSummary.total_tables++;
+            }
 
-			if (tableData.has_permission_error) {
-				auditSummary.failed_objects++;
-				console.log(`${colors.yellow}  └ ✓ Audit for '${table.table_name}' complete (with errors).${colors.nc}`);
-			} else {
-				console.log(`${colors.green}  └ ✓ Audit for '${table.table_name}' complete.${colors.nc}`);
-			}
+            if (tableData.has_permission_error) {
+                auditSummary.failed_objects++;
+                console.log(`${colors.yellow}  └ ⚠ Audit for '${table.table_name}' complete (with errors).${colors.nc}`);
+            } else {
+                console.log(`${colors.green}  └ ✓ Audit for '${table.table_name}' complete.${colors.nc}`);
+            }
 
-			allTables.push(tableData);
+            allTables.push(tableData);
 
-			// Append to summary CSV
-			const summaryRow = [
-				csvEscape(tableData.table_name),
-				csvEscape(tableData.table_type),
-				row_count,
-				column_count,
-				csvEscape(tableData.creation_time),
-				tableData.has_permission_error,
-				csvEscape(tableData.error_details.join('; '))
-			].join(',');
-			await fs.appendFile(path.join(config.outputDir, 'all_tables_summary.csv'), summaryRow + '\n');
-		}
+            // Append to summary CSV
+            const summaryRow = [
+                csvEscape(tableData.table_name),
+                csvEscape(tableData.table_type),
+                row_count,
+                column_count,
+                csvEscape(tableData.creation_time),
+                tableData.has_permission_error,
+                csvEscape(tableData.error_details.join('; '))
+            ].join(',');
+            await fs.appendFile(path.join(config.outputDir, 'all_tables_summary.csv'), summaryRow + '\n');
+            }
 
-		// Finalize JSON
-		const finalJson = {
-			audit_metadata: {
-				generated_at: new Date().toISOString(),
-				project_id: config.projectId,
-				dataset_id: config.datasetId,
-				region: config.location
-			},
-			tables: allTables,
-			summary: { ...auditSummary, total_objects: tables.length }
-		};
-		await fs.writeFile(path.join(config.outputDir, 'dataset_audit.json'), JSON.stringify(finalJson, null, 2));
+            
 
-		// Finalize audit summary CSV
-		const auditSummaryCsv = [
-			'metric,value',
-			`total_tables,${auditSummary.total_tables}`,
-			`total_views,${auditSummary.total_views}`,
-			`total_objects,${tables.length}`,
-			`failed_objects,${auditSummary.failed_objects}`,
-			`total_rows_accessible,${auditSummary.total_rows_accessible}`
-		].join('\n');
-		await fs.writeFile(path.join(config.outputDir, 'audit_summary.csv'), auditSummaryCsv + '\n');
+            
+        // Finalize JSON
+        const finalJson = {
+            audit_metadata: {
+                generated_at: new Date().toISOString(),
+                project_id: config.projectId,
+                dataset_id: config.datasetId,
+                region: config.location
+            },
+            tables: allTables,
+            summary: { ...auditSummary, total_objects: tables.length }
+        };
+        await fs.writeFile(path.join(config.outputDir, 'reports', 'dataset_audit.json'), JSON.stringify(finalJson, null, 2));
 
-		// Generate HTML Report
-		console.log(`\n${colors.yellow}Generating Mixpanel-themed HTML report...${colors.nc}`);
-		const htmlReport = generateHtmlReport(finalJson);
-		await fs.writeFile(path.join(config.outputDir, 'audit_report.html'), htmlReport);
+        // Finalize audit summary CSV
+        const auditSummaryCsv = [
+            'metric,value',
+            `total_tables,${auditSummary.total_tables}`,
+            `total_views,${auditSummary.total_views}`,
+            `total_objects,${tables.length}`,
+            `failed_objects,${auditSummary.failed_objects}`,
+            `total_rows_accessible,${auditSummary.total_rows_accessible}`
+        ].join('\n');
+        await fs.writeFile(path.join(config.outputDir, 'reports', 'audit_summary.csv'), auditSummaryCsv + '\n');
 
-		console.log(`\n${colors.green}✔ Audit complete!${colors.nc}`);
-		console.log('==========================================');
-		console.log(`All outputs are located in: ${colors.cyan}${config.outputDir}${colors.nc}`);
-		console.log(`  - Interactive Report: ${colors.cyan}${path.join(config.outputDir, 'audit_report.html')}${colors.nc}`);
-		console.log(`  - Full JSON Output: ${colors.cyan}${path.join(config.outputDir, 'dataset_audit.json')}${colors.nc}`);
-		console.log(`  - Tables Summary:   ${colors.cyan}${path.join(config.outputDir, 'all_tables_summary.csv')}${colors.nc}`);
-		console.log(`  - Schema Catalog:   ${colors.cyan}${path.join(config.outputDir, 'all_schemas_catalog.csv')}${colors.nc}`);
-		console.log('==========================================');
+        // Generate HTML Report
+        console.log(`\n${colors.yellow}Generating Mixpanel-themed HTML report...${colors.nc}`);
+        const htmlReport = generateHtmlReport(finalJson);
+        await fs.writeFile(path.join(config.outputDir, 'reports', 'audit_report.html'), htmlReport);
+
+        console.log(`\n${colors.green}✔ Audit complete!${colors.nc}`);
+        console.log('==========================================');
+        console.log(`All outputs are located in: ${colors.cyan}${config.outputDir}${colors.nc}`);
+        console.log(`  - Interactive Report: ${colors.cyan}${path.join(config.outputDir, 'reports', 'audit_report.html')}${colors.nc}`);
+		console.log(`  - Full JSON Output: ${colors.cyan}${path.join(config.outputDir, 'reports', 'dataset_audit.json')}${colors.nc}`);
+		console.log(`  - Tables Summary:   ${colors.cyan}${path.join(config.outputDir, 'reports', 'all_tables_summary.csv')}${colors.nc}`);
+		console.log(`  - Schema Catalog:   ${colors.cyan}${path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv')}${colors.nc}`);
+        console.log('==========================================');
 
 	} catch (error) {
 		console.error(`\n${colors.red}Fatal Error: Could not fetch table list. Check permissions or dataset existence.${colors.nc}`);

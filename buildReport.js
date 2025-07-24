@@ -131,6 +131,8 @@ function generateHtmlReport(data) {
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
         th { color: var(--text-primary); font-weight: 600; }
+        tr:hover { background-color: var(--bg-light); color: var(--text-primary); }
+        tr:hover td { color: var(--text-primary); }
         .error-message { background: var(--error-glow); border: 1px solid var(--error); color: var(--error); padding: 10px; border-radius: 8px; margin-top: 10px; font-family: monospace; }
     </style>
 </head>
