@@ -1,0 +1,16 @@
+{
+  "name": "ak-audit",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "ak@mixpanel.com",
+  "license": "ISC",
+  "description": "audit data warehouse tables",
+  "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1"
+  }
+}
