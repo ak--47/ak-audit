@@ -6,7 +6,7 @@
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"prune": "rm -rf ./output/*",
-		"serve": "npx serve ./output"
+		"serve": "npx serve ./output/reports"
 	},
 	"keywords": [],
 	"author": "ak@mixpanel.com",

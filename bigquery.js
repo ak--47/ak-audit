@@ -113,18 +113,33 @@ async function testBigQueryAuth() {
 	console.log(`${colors.yellow}Testing BigQuery authentication and connectivity...${colors.nc}`);
 	try {
 		const datasets = await bigquery.getDatasets();
-		console.log(`${colors.green}✓ BigQuery authentication successful.${colors.nc}\n`);
+		console.log(`${colors.green}✓ BigQuery authentication successful.${colors.nc}`);
+		
+		// Test if we have query permissions (jobUser role)
+		try {
+			await bigquery.query({ 
+				query: 'SELECT 1 as test', 
+				location: config.location,
+				dryRun: true 
+			});
+			console.log(`${colors.green}✓ Query permissions available (jobUser role detected).${colors.nc}\n`);
+			return 'jobUser';
+		} catch (queryError) {
+			console.log(`${colors.yellow}⚠ Query permissions not available - will use REST API only (dataViewer mode).${colors.nc}\n`);
+			return 'dataViewer';
+		}
 	} catch (error) {
 		if (NODE_ENV === "dev") debugger;
 		console.error(`${colors.red}Fatal Error: BigQuery authentication or connectivity failed. Please check your Google Cloud credentials and network access.${colors.nc}`);
 		console.error(error.message);
-		console.error(`\n${colors.yellow}Try running these commands to set up proper permissions:${colors.nc}`);
+		console.error(`\n${colors.yellow}Try running this command to set up basic permissions:${colors.nc}`);
+		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
+		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
+		console.error(`${colors.cyan}  --role='roles/bigquery.dataViewer'${colors.nc}`);
+		console.error(`\n${colors.yellow}For full functionality, also add:${colors.nc}`);
 		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
 		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
 		console.error(`${colors.cyan}  --role='roles/bigquery.jobUser'${colors.nc}`);
-		console.error(`\n${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
-		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
-		console.error(`${colors.cyan}  --role='roles/bigquery.dataViewer'${colors.nc}`);
 		process.exit(1);
 	}
 }
@@ -178,8 +193,113 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults 
 	}
 }
 
+// REST API function to get table list when query permissions are not available
+async function getTablesViaREST(projectId, datasetId) {
+	try {
+		const authClient = await auth.getClient();
+		const accessToken = await authClient.getAccessToken();
+		
+		const url = `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables`;
+		
+		return new Promise((resolve, reject) => {
+			const options = {
+				headers: {
+					'Authorization': `Bearer ${accessToken.token}`,
+					'Content-Type': 'application/json'
+				}
+			};
+			
+			https.get(url, options, (res) => {
+				let data = '';
+				res.on('data', chunk => data += chunk);
+				res.on('end', () => {
+					try {
+						const response = JSON.parse(data);
+						if (response.tables) {
+							const tables = response.tables.map(table => ({
+								table_name: table.tableReference.tableId,
+								table_type: table.type === 'VIEW' ? 'VIEW' : 'BASE TABLE',
+								creation_time: new Date(parseInt(table.creationTime)).toISOString().replace('T', ' ').substring(0, 19),
+								ddl: null // Not available via REST API
+							}));
+							resolve(tables);
+						} else {
+							resolve([]);
+						}
+					} catch (parseError) {
+						reject(parseError);
+					}
+				});
+			}).on('error', reject);
+		});
+	} catch (error) {
+		throw error;
+	}
+}
+
+// REST API function to get table schema when query permissions are not available
+async function getTableSchemaViaREST(projectId, datasetId, tableName) {
+	try {
+		const authClient = await auth.getClient();
+		const accessToken = await authClient.getAccessToken();
+		
+		const url = `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables/${tableName}`;
+		
+		return new Promise((resolve, reject) => {
+			const options = {
+				headers: {
+					'Authorization': `Bearer ${accessToken.token}`,
+					'Content-Type': 'application/json'
+				}
+			};
+			
+			https.get(url, options, (res) => {
+				let data = '';
+				res.on('data', chunk => data += chunk);
+				res.on('end', () => {
+					try {
+						const response = JSON.parse(data);
+						if (response.schema && response.schema.fields) {
+							// Convert REST API schema format to our expected format
+							const schema = [];
+							
+							function processFields(fields, parentPath = '') {
+								fields.forEach(field => {
+									const fieldPath = parentPath ? `${parentPath}.${field.name}` : field.name;
+									schema.push({
+										column_name: field.name,
+										nested_field_path: fieldPath,
+										nested_type: field.type,
+										is_nullable: field.mode === 'NULLABLE' ? 'YES' : 'NO',
+										is_partitioning_column: 'NO', // Not available via REST API
+										clustering_ordinal_position: null
+									});
+									
+									// Handle nested fields
+									if (field.fields) {
+										processFields(field.fields, fieldPath);
+									}
+								});
+							}
+							
+							processFields(response.schema.fields);
+							resolve(schema);
+						} else {
+							resolve([]);
+						}
+					} catch (parseError) {
+						reject(parseError);
+					}
+				});
+			}).on('error', reject);
+		});
+	} catch (error) {
+		throw error;
+	}
+}
+
 async function runAudit() {
-	await testBigQueryAuth();
+	const permissionMode = await testBigQueryAuth();
 	console.log(`${colors.cyan}=== BigQuery Dataset Audit Initializing ===${colors.nc}`);
 	console.log('-------------------------------------------');
 	console.log(`${colors.green}▸ Project:${colors.nc}          ${config.projectId}`);
@@ -219,26 +339,49 @@ async function runAudit() {
 	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_tables_summary.csv'), allTablesSummaryCsv.join(',') + '\n');
 	await fs.writeFile(path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv'), allSchemasCatalogCsv.join(',') + '\n');
 
+	let tables;
 	try {
-		console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
-		let tablesQuery = `
-            SELECT 
-                table_name, 
-                table_type, 
-                FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', creation_time, 'UTC') as creation_time, 
-                ddl
-            FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.TABLES\`
-            WHERE table_schema = '${config.datasetId}'`;
-		
-		// Add table filtering if specified
-		if (config.tableFilter && config.tableFilter.length > 0) {
-			const tableList = config.tableFilter.map(t => `'${t}'`).join(',');
-			tablesQuery += ` AND table_name IN (${tableList})`;
-		}
-		
-		tablesQuery += ` ORDER BY table_type, table_name`;
+		if (permissionMode === 'jobUser') {
+			console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
+			let tablesQuery = `
+	            SELECT 
+	                table_name, 
+	                table_type, 
+	                FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', creation_time, 'UTC') as creation_time, 
+	                ddl
+	            FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.TABLES\`
+	            WHERE table_schema = '${config.datasetId}'`;
+			
+			// Add table filtering if specified
+			if (config.tableFilter && config.tableFilter.length > 0) {
+				const tableList = config.tableFilter.map(t => `'${t}'`).join(',');
+				tablesQuery += ` AND table_name IN (${tableList})`;
+			}
+			
+			tablesQuery += ` ORDER BY table_type, table_name`;
 
-		const [tables] = await bigquery.query({ query: tablesQuery, location: config.location });
+			const [queryResults] = await bigquery.query({ query: tablesQuery, location: config.location });
+			tables = queryResults;
+		} else {
+			// dataViewer mode - use REST API
+			console.log(`${colors.yellow}Fetching table list via REST API (dataViewer mode)...${colors.nc}`);
+			const allTables = await getTablesViaREST(config.projectId, config.datasetId);
+			
+			// Apply table filtering if specified
+			if (config.tableFilter && config.tableFilter.length > 0) {
+				tables = allTables.filter(table => config.tableFilter.includes(table.table_name));
+			} else {
+				tables = allTables;
+			}
+			
+			// Sort tables
+			tables.sort((a, b) => {
+				if (a.table_type !== b.table_type) {
+					return a.table_type.localeCompare(b.table_type);
+				}
+				return a.table_name.localeCompare(b.table_name);
+			});
+		}
 
 		if (config.tableFilter && config.tableFilter.length > 0) {
 			console.log(`${colors.green}✓ Found ${tables.length} objects to audit (filtered from ${config.tableFilter.length} requested tables).\n`);
@@ -252,11 +395,18 @@ async function runAudit() {
 		
 		for (const table of tables) {
 			try {
-				const schemaQuery = `
-                    SELECT column_name, field_path, data_type
-                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\`
-                    WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'`;
-				const [schema] = await bigquery.query({ query: schemaQuery, location: config.location });
+				let schema;
+				if (permissionMode === 'jobUser') {
+					const schemaQuery = `
+	                    SELECT column_name, field_path, data_type
+	                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\`
+	                    WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'`;
+					const [queryResult] = await bigquery.query({ query: schemaQuery, location: config.location });
+					schema = queryResult;
+				} else {
+					// dataViewer mode - use REST API
+					schema = await getTableSchemaViaREST(config.projectId, config.datasetId, table.table_name);
+				}
 				
 				for (const field of schema) {
 					const fieldName = field.column_name;
@@ -316,26 +466,33 @@ async function runAudit() {
 				}
 			}
 
-			// 1. Get Schema using COLUMN_FIELD_PATHS for nested/repeated field support
+			// 1. Get Schema (method depends on permission mode)
 			let column_count = 0;
 			try {
-				const schemaQuery = `
-                    SELECT 
-                        cfp.column_name, 
-                        cfp.field_path AS nested_field_path,
-                        cfp.data_type AS nested_type,
-                        COALESCE(c.is_nullable, 'YES') as is_nullable,
-                        COALESCE(c.is_partitioning_column, 'NO') as is_partitioning_column,
-                        c.clustering_ordinal_position
-                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
-                    LEFT JOIN \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMNS\` c
-                      ON cfp.table_catalog = c.table_catalog 
-                      AND cfp.table_schema = c.table_schema 
-                      AND cfp.table_name = c.table_name 
-                      AND cfp.column_name = c.column_name
-                    WHERE cfp.table_name = '${table.table_name}' AND cfp.table_schema = '${config.datasetId}'
-                    ORDER BY cfp.field_path`;
-				const [schema] = await bigquery.query({ query: schemaQuery, location: config.location });
+				let schema;
+				if (permissionMode === 'jobUser') {
+					const schemaQuery = `
+	                    SELECT 
+	                        cfp.column_name, 
+	                        cfp.field_path AS nested_field_path,
+	                        cfp.data_type AS nested_type,
+	                        COALESCE(c.is_nullable, 'YES') as is_nullable,
+	                        COALESCE(c.is_partitioning_column, 'NO') as is_partitioning_column,
+	                        c.clustering_ordinal_position
+	                    FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
+	                    LEFT JOIN \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMNS\` c
+	                      ON cfp.table_catalog = c.table_catalog 
+	                      AND cfp.table_schema = c.table_schema 
+	                      AND cfp.table_name = c.table_name 
+	                      AND cfp.column_name = c.column_name
+	                    WHERE cfp.table_name = '${table.table_name}' AND cfp.table_schema = '${config.datasetId}'
+	                    ORDER BY cfp.field_path`;
+					const [queryResult] = await bigquery.query({ query: schemaQuery, location: config.location });
+					schema = queryResult;
+				} else {
+					// dataViewer mode - use REST API
+					schema = await getTableSchemaViaREST(config.projectId, config.datasetId, table.table_name);
+				}
 				
 				// Add join key detection to schema
 				const schemaWithJoinKeys = schema.map(col => ({
@@ -379,56 +536,145 @@ async function runAudit() {
 				console.log(`${colors.yellow}  └ ⚠ Schema access failed. ${e.message}${colors.nc}`);
 			}
 
-			// 1.5. Get Partition and Clustering Information
-			try {
-				const partitionQuery = `
-					SELECT 
-						partition_id,
-						total_rows,
-						total_logical_bytes,
-						last_modified_time
-					FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.PARTITIONS_SUMMARY\`
-					WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'
-					ORDER BY partition_id
-					LIMIT 10`;  // Limit to first 10 partitions for performance
-				const [partitions] = await bigquery.query({ query: partitionQuery, location: config.location });
-				tableData.partition_info = partitions;
-				
-				if (partitions && partitions.length > 0) {
-					console.log(`${colors.green}  └ ✓ Found ${partitions.length} partitions${colors.nc}`);
+			// 1.5. Get Partition and Clustering Information (only in jobUser mode)
+			if (permissionMode === 'jobUser') {
+				try {
+					const partitionQuery = `
+						SELECT 
+							partition_id,
+							total_rows,
+							total_logical_bytes,
+							last_modified_time
+						FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.PARTITIONS_SUMMARY\`
+						WHERE table_name = '${table.table_name}' AND table_schema = '${config.datasetId}'
+						ORDER BY partition_id
+						LIMIT 10`;  // Limit to first 10 partitions for performance
+					const [partitions] = await bigquery.query({ query: partitionQuery, location: config.location });
+					tableData.partition_info = partitions;
+					
+					if (partitions && partitions.length > 0) {
+						console.log(`${colors.green}  └ ✓ Found ${partitions.length} partitions${colors.nc}`);
+					}
+				} catch (e) {
+					// This is not critical, tables might not be partitioned
+					tableData.partition_info = [];
 				}
-			} catch (e) {
-				// This is not critical, tables might not be partitioned
+			} else {
+				// Skip partition info in dataViewer mode
 				tableData.partition_info = [];
 			}
 
-			// 2. Get Row Count
+			// 2. Get Row Count (only in jobUser mode)
 			let row_count = 0;
-			try {
-				const countQuery = `SELECT COUNT(*) as count FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\``;
-				const [countResult] = await bigquery.query({ query: countQuery, location: config.location });
-				row_count = countResult[0].count;
-				tableData.row_count = row_count;
-				auditSummary.total_rows_accessible += Number(row_count);
-			} catch (e) {
-				tableData.has_permission_error = true;
-				tableData.error_details.push('Row Count');
-				tableData.row_count = null;
-				tableData.row_count_error = jsonEscape(e.message);
-				console.log(`${colors.yellow}  └ ⚠ Row count failed. ${e.message}${colors.nc}`);
+			if (permissionMode === 'jobUser') {
+				try {
+					const countQuery = `SELECT COUNT(*) as count FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\``;
+					const [countResult] = await bigquery.query({ query: countQuery, location: config.location });
+					row_count = countResult[0].count;
+					tableData.row_count = row_count;
+					auditSummary.total_rows_accessible += Number(row_count);
+				} catch (e) {
+					tableData.has_permission_error = true;
+					tableData.error_details.push('Row Count');
+					tableData.row_count = null;
+					tableData.row_count_error = jsonEscape(e.message);
+					console.log(`${colors.yellow}  └ ⚠ Row count failed. ${e.message}${colors.nc}`);
+				}
+			} else {
+				// In dataViewer mode, use metadata from size query if available
+				tableData.row_count = tableData.num_rows_metadata || null;
+				row_count = tableData.row_count || 0;
+				if (tableData.row_count) {
+					auditSummary.total_rows_accessible += Number(tableData.row_count);
+				}
 			}
 
-			// 3. Get Sample Data with REST API fallback
-			try {
-				const sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT ${config.sampleLimit}`;
-				const [sampleData] = await bigquery.query({ query: sampleQuery, location: config.location });
-				tableData.sample_data = sampleData;
-				await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleData, null, 2));
-				console.log(`${colors.green}  └ ✓ Sample data retrieved via query (${sampleData.length} rows)${colors.nc}`);
-			} catch (e) {
-				console.log(`${colors.yellow}  └ ⚠ Query failed for sample data, trying REST API fallback...${colors.nc}`);
+			// 3. Get Sample Data
+			if (permissionMode === 'jobUser') {
+				// Use query-based approach with partition optimization
 				try {
-					// Try REST API fallback for sample data
+					let sampleQuery;
+					let partitionInfo = '';
+					
+					// Check if table has partition info and use it for efficient sampling
+					if (tableData.partition_info && tableData.partition_info.length > 0) {
+						// Find partitions with data (prefer recent partitions)
+						const partitionsWithData = tableData.partition_info
+							.filter(p => p.total_rows > 0 && p.partition_id !== '__NULL__' && p.partition_id !== '__UNPARTITIONED__')
+							.sort((a, b) => new Date(b.last_modified_time) - new Date(a.last_modified_time));
+						
+						if (partitionsWithData.length > 0) {
+							// Use partition-specific query to avoid full table scan
+							const partitionColumn = (tableData.schema || []).find(col => col.is_partitioning_column === 'YES');
+							if (partitionColumn && partitionColumn.column_name) {
+								// Take up to 3 recent partitions to get diverse sample data
+								const selectedPartitions = partitionsWithData.slice(0, 3);
+								const partitionConditions = selectedPartitions.map(p => {
+									// Handle different partition types
+									if (p.partition_id.match(/^\d{8}$/)) {
+										// Date partition (YYYYMMDD format)
+										return `DATE(${partitionColumn.column_name}) = DATE('${p.partition_id.replace(/(\\d{4})(\\d{2})(\\d{2})/, '$1-$2-$3')}')`;
+									} else if (p.partition_id.match(/^\d{10}$/)) {
+										// Datetime/timestamp partition  
+										return `DATE(${partitionColumn.column_name}) = DATE('${p.partition_id.substring(0,4)}-${p.partition_id.substring(4,6)}-${p.partition_id.substring(6,8)}')`;
+									} else {
+										// Direct partition value (integer partitioning, etc.)
+										return `${partitionColumn.column_name} = '${p.partition_id}'`;
+									}
+								});
+								
+								sampleQuery = `
+									SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\`
+									WHERE (${partitionConditions.join(' OR ')})
+									LIMIT ${config.sampleLimit}`;
+								partitionInfo = ` from ${selectedPartitions.length} partition(s)`;
+							} else {
+								// Fallback: use TABLESAMPLE for large partitioned tables
+								sampleQuery = `
+									SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` TABLESAMPLE SYSTEM (1 PERCENT)
+									LIMIT ${config.sampleLimit}`;
+								partitionInfo = ` using table sampling`;
+							}
+						} else {
+							// No partitions with data, use regular query
+							sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT ${config.sampleLimit}`;
+						}
+					} else {
+						// Non-partitioned table or no partition info available - use TABLESAMPLE for efficiency if table is large
+						const rowCount = tableData.row_count || tableData.num_rows_metadata || 0;
+						if (rowCount > 1000000) { // 1M+ rows, use sampling
+							sampleQuery = `
+								SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` TABLESAMPLE SYSTEM (0.1 PERCENT)
+								LIMIT ${config.sampleLimit}`;
+							partitionInfo = ` using table sampling (large table)`;
+						} else {
+							sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${table.table_name}\` LIMIT ${config.sampleLimit}`;
+						}
+					}
+					
+					const [sampleData] = await bigquery.query({ query: sampleQuery, location: config.location });
+					tableData.sample_data = sampleData;
+					await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleData, null, 2));
+					console.log(`${colors.green}  └ ✓ Sample data retrieved via query${partitionInfo} (${sampleData.length} rows)${colors.nc}`);
+				} catch (e) {
+					console.log(`${colors.yellow}  └ ⚠ Query failed for sample data, trying REST API fallback...${colors.nc}`);
+					try {
+						// Try REST API fallback for sample data
+						const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, config.sampleLimit);
+						tableData.sample_data = sampleDataRest;
+						await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleDataRest, null, 2));
+						console.log(`${colors.green}  └ ✓ Sample data retrieved via REST API (${sampleDataRest.length} rows)${colors.nc}`);
+					} catch (restError) {
+						tableData.has_permission_error = true;
+						tableData.error_details.push('Sample Data');
+						tableData.sample_data = [];
+						tableData.sample_data_error = jsonEscape(e.message + '; REST fallback: ' + restError.message);
+						console.log(`${colors.yellow}  └ ⚠ Both query and REST API failed for sample data. ${restError.message}${colors.nc}`);
+					}
+				}
+			} else {
+				// dataViewer mode - use REST API directly
+				try {
 					const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, config.sampleLimit);
 					tableData.sample_data = sampleDataRest;
 					await fs.writeFile(path.join(config.outputDir, 'samples', `${table.table_name}.json`), JSON.stringify(sampleDataRest, null, 2));
@@ -437,8 +683,8 @@ async function runAudit() {
 					tableData.has_permission_error = true;
 					tableData.error_details.push('Sample Data');
 					tableData.sample_data = [];
-					tableData.sample_data_error = jsonEscape(e.message + '; REST fallback: ' + restError.message);
-					console.log(`${colors.yellow}  └ ⚠ Both query and REST API failed for sample data. ${restError.message}${colors.nc}`);
+					tableData.sample_data_error = jsonEscape(restError.message);
+					console.log(`${colors.yellow}  └ ⚠ REST API failed for sample data. ${restError.message}${colors.nc}`);
 				}
 			}
 
@@ -582,12 +828,12 @@ async function runAudit() {
         // Generate HTML Report
         console.log(`\n${colors.yellow}Generating Mixpanel-themed HTML report...${colors.nc}`);
         const htmlReport = generateHtmlReport(finalJson);
-        await fs.writeFile(path.join(config.outputDir, 'reports', 'audit_report.html'), htmlReport);
+        await fs.writeFile(path.join(config.outputDir, 'reports', 'index.html'), htmlReport);
 
         console.log(`\n${colors.green}✔ Audit complete!${colors.nc}`);
         console.log('==========================================');
         console.log(`All outputs are located in: ${colors.cyan}${config.outputDir}${colors.nc}`);
-        console.log(`  - Interactive Report: ${colors.cyan}${path.join(config.outputDir, 'reports', 'audit_report.html')}${colors.nc}`);
+        console.log(`  - Interactive Report: ${colors.cyan}${path.join(config.outputDir, 'reports', 'index.html')}${colors.nc}`);
 		console.log(`  - Full JSON Output: ${colors.cyan}${path.join(config.outputDir, 'reports', 'dataset_audit.json')}${colors.nc}`);
 		console.log(`  - Tables Summary:   ${colors.cyan}${path.join(config.outputDir, 'reports', 'all_tables_summary.csv')}${colors.nc}`);
 		console.log(`  - Schema Catalog:   ${colors.cyan}${path.join(config.outputDir, 'reports', 'all_schemas_catalog.csv')}${colors.nc}`);

@@ -7,8 +7,8 @@ function generateHtmlReport(data) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BigQuery Dataset Audit Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.min.js" integrity="sha512-L0Shl7nXXzIlBSUUPpxrokqq4ojqgZFQczTYlGjzONGTDAcLremjwaWv5A+EDLnxhQzY5xUZPWLOLqYRkY0Cbw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <style>
         :root {
             --primary: #7856FF;
@@ -506,6 +506,29 @@ function generateHtmlReport(data) {
                 Chart.defaults.borderColor = '#2c3a54';
                 Chart.defaults.plugins.legend.labels.color = '#a3b3cc';
 
+                // Destroy existing chart instances and reset canvas elements to prevent memory leaks and growing charts
+                const existingCharts = ['sizeChart', 'rowCountChart', 'tableTypeChart', 'partitionChart'];
+                existingCharts.forEach(chartId => {
+                    const existingChart = Chart.getChart(chartId);
+                    if (existingChart) {
+                        existingChart.destroy();
+                    }
+                    
+                    // Reset the canvas element completely with fixed dimensions
+                    const canvas = document.getElementById(chartId);
+                    if (canvas) {
+                        const parent = canvas.parentNode;
+                        const newCanvas = document.createElement('canvas');
+                        newCanvas.id = chartId;
+                        // Set explicit canvas size to prevent growing
+                        newCanvas.width = 400;
+                        newCanvas.height = 300;
+                        newCanvas.style.width = '100%';
+                        newCanvas.style.height = '300px';
+                        parent.replaceChild(newCanvas, canvas);
+                    }
+                });
+
                 // Table Size Distribution
                 const sizeData = data.tables
                     .filter(t => t.size_mb > 0)
@@ -525,8 +548,9 @@ function generateHtmlReport(data) {
                         }]
                     },
                     options: {
-                        responsive: true,
+                        responsive: false,
                         maintainAspectRatio: false,
+                        animation: false,
                         plugins: {
                             legend: { display: false }
                         },
@@ -566,8 +590,9 @@ function generateHtmlReport(data) {
                         }]
                     },
                     options: {
-                        responsive: true,
+                        responsive: false,
                         maintainAspectRatio: false,
+                        animation: false,
                         plugins: {
                             legend: { display: false }
                         },
@@ -619,8 +644,9 @@ function generateHtmlReport(data) {
                         }]
                     },
                     options: {
-                        responsive: true,
+                        responsive: false,
                         maintainAspectRatio: false,
+                        animation: false,
                         plugins: {
                             legend: {
                                 position: 'bottom',
@@ -655,8 +681,9 @@ function generateHtmlReport(data) {
                         }]
                     },
                     options: {
-                        responsive: true,
+                        responsive: false,
                         maintainAspectRatio: false,
+                        animation: false,
                         plugins: {
                             legend: {
                                 position: 'bottom',
