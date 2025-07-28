@@ -157,15 +157,27 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults 
 				headers: {
 					'Authorization': `Bearer ${accessToken.token}`,
 					'Content-Type': 'application/json'
-				}
+				},
+				timeout: 30000 // 30 second timeout
 			};
 			
-			https.get(url, options, (res) => {
+			const req = https.get(url, options, (res) => {
+				// Check for HTTP error status codes
+				if (res.statusCode < 200 || res.statusCode >= 300) {
+					reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+					return;
+				}
+				
 				let data = '';
 				res.on('data', chunk => data += chunk);
 				res.on('end', () => {
 					try {
 						const response = JSON.parse(data);
+						if (response.error) {
+							reject(new Error(`BigQuery API Error: ${response.error.message}`));
+							return;
+						}
+						
 						if (response.rows) {
 							// Convert BigQuery REST API format to standard row format
 							const schema = response.schema?.fields || [];
@@ -183,13 +195,24 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults 
 							resolve([]);
 						}
 					} catch (parseError) {
-						reject(parseError);
+						reject(new Error(`Failed to parse response: ${parseError.message}`));
 					}
 				});
-			}).on('error', reject);
+			});
+			
+			req.on('error', (error) => {
+				reject(new Error(`Request failed: ${error.message}`));
+			});
+			
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('Request timed out after 30 seconds'));
+			});
+			
+			req.setTimeout(30000);
 		});
 	} catch (error) {
-		throw error;
+		throw new Error(`Authentication failed: ${error.message}`);
 	}
 }
 
@@ -206,15 +229,27 @@ async function getTablesViaREST(projectId, datasetId) {
 				headers: {
 					'Authorization': `Bearer ${accessToken.token}`,
 					'Content-Type': 'application/json'
-				}
+				},
+				timeout: 30000 // 30 second timeout
 			};
 			
-			https.get(url, options, (res) => {
+			const req = https.get(url, options, (res) => {
+				// Check for HTTP error status codes
+				if (res.statusCode < 200 || res.statusCode >= 300) {
+					reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+					return;
+				}
+				
 				let data = '';
 				res.on('data', chunk => data += chunk);
 				res.on('end', () => {
 					try {
 						const response = JSON.parse(data);
+						if (response.error) {
+							reject(new Error(`BigQuery API Error: ${response.error.message}`));
+							return;
+						}
+						
 						if (response.tables) {
 							const tables = response.tables.map(table => ({
 								table_name: table.tableReference.tableId,
@@ -227,13 +262,24 @@ async function getTablesViaREST(projectId, datasetId) {
 							resolve([]);
 						}
 					} catch (parseError) {
-						reject(parseError);
+						reject(new Error(`Failed to parse response: ${parseError.message}`));
 					}
 				});
-			}).on('error', reject);
+			});
+			
+			req.on('error', (error) => {
+				reject(new Error(`Request failed: ${error.message}`));
+			});
+			
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('Request timed out after 30 seconds'));
+			});
+			
+			req.setTimeout(30000);
 		});
 	} catch (error) {
-		throw error;
+		throw new Error(`Authentication failed: ${error.message}`);
 	}
 }
 
@@ -250,15 +296,27 @@ async function getTableSchemaViaREST(projectId, datasetId, tableName) {
 				headers: {
 					'Authorization': `Bearer ${accessToken.token}`,
 					'Content-Type': 'application/json'
-				}
+				},
+				timeout: 30000 // 30 second timeout
 			};
 			
-			https.get(url, options, (res) => {
+			const req = https.get(url, options, (res) => {
+				// Check for HTTP error status codes
+				if (res.statusCode < 200 || res.statusCode >= 300) {
+					reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+					return;
+				}
+				
 				let data = '';
 				res.on('data', chunk => data += chunk);
 				res.on('end', () => {
 					try {
 						const response = JSON.parse(data);
+						if (response.error) {
+							reject(new Error(`BigQuery API Error: ${response.error.message}`));
+							return;
+						}
+						
 						if (response.schema && response.schema.fields) {
 							// Convert REST API schema format to our expected format
 							const schema = [];
@@ -288,13 +346,24 @@ async function getTableSchemaViaREST(projectId, datasetId, tableName) {
 							resolve([]);
 						}
 					} catch (parseError) {
-						reject(parseError);
+						reject(new Error(`Failed to parse response: ${parseError.message}`));
 					}
 				});
-			}).on('error', reject);
+			});
+			
+			req.on('error', (error) => {
+				reject(new Error(`Request failed: ${error.message}`));
+			});
+			
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('Request timed out after 30 seconds'));
+			});
+			
+			req.setTimeout(30000);
 		});
 	} catch (error) {
-		throw error;
+		throw new Error(`Authentication failed: ${error.message}`);
 	}
 }
 
@@ -393,6 +462,18 @@ async function runAudit() {
 		console.log(`${colors.yellow}Analyzing schemas for join key detection...${colors.nc}`);
 		const allFieldNames = new Map(); // field_name -> Set of table names that have this field
 		
+		// Common event fields that should be excluded from join key detection
+		const excludedFieldNames = new Set([
+			'event', 'event_name', 'event_id', 'insert_id', 'time', 
+			'timestamp', 'created_at', 'updated_at', 'event_time',
+			'_table_suffix', '_partitiontime', '_partitiondate'
+		]);
+		
+		// Valid join key data types (BigQuery types)
+		const validJoinKeyTypes = new Set([
+			'STRING', 'INT64', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT'
+		]);
+		
 		for (const table of tables) {
 			try {
 				let schema;
@@ -410,6 +491,24 @@ async function runAudit() {
 				
 				for (const field of schema) {
 					const fieldName = field.column_name;
+					const fieldPath = field.field_path || field.nested_field_path || fieldName;
+					const dataType = field.data_type || field.nested_type || '';
+					
+					// Skip if field name is in exclusion list
+					if (excludedFieldNames.has(fieldName.toLowerCase())) {
+						continue;
+					}
+					
+					// Skip if field is nested (contains dots in field path, indicating it's inside a struct/array)
+					if (fieldPath && fieldPath !== fieldName && fieldPath.includes('.')) {
+						continue;
+					}
+					
+					// Skip if data type is not a valid join key type
+					if (!validJoinKeyTypes.has(dataType.toUpperCase())) {
+						continue;
+					}
+					
 					if (!allFieldNames.has(fieldName)) {
 						allFieldNames.set(fieldName, new Set());
 					}
