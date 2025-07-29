@@ -156,9 +156,12 @@ function generateHtmlReport(data) {
         .analytics-section { margin-bottom: 40px; }
         .charts-grid { 
             display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); 
+            grid-template-columns: 1fr 1fr; 
             gap: 20px; 
             margin-bottom: 30px; 
+        }
+        .chart-container.full-width {
+            grid-column: 1 / -1;
         }
         .chart-container { 
             background: var(--bg-medium); 
@@ -264,18 +267,20 @@ function generateHtmlReport(data) {
             <div class="card"><h3>Total Objects</h3><div class="number" id="summaryTotalObjects">0</div></div>
             <div class="card"><h3>Tables</h3><div class="number" id="summaryTables">0</div></div>
             <div class="card"><h3>Views</h3><div class="number" id="summaryViews">0</div></div>
+            <div class="card"><h3>Total Rows</h3><div class="number" id="summaryTotalRows">0</div></div>
+            <div class="card"><h3>Total Size</h3><div class="number" id="summaryTotalSize">0 B</div></div>
             <div class="card error"><h3>Objects with Errors</h3><div class="number" id="summaryFailedObjects">0</div></div>
         </section>
         
         <section class="analytics-section">
             <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">📊 Table Analytics</h2>
             <div class="charts-grid">
-                <div class="chart-container">
-                    <div class="chart-title">Table Size Distribution</div>
+                <div class="chart-container full-width">
+                    <div class="chart-title">Table Size Distribution (Top 15)</div>
                     <canvas id="sizeChart"></canvas>
                 </div>
-                <div class="chart-container">
-                    <div class="chart-title">Row Count Distribution</div>
+                <div class="chart-container full-width">
+                    <div class="chart-title">Row Count Distribution (Top 15)</div>
                     <canvas id="rowCountChart"></canvas>
                 </div>
                 <div class="chart-container">
@@ -331,6 +336,27 @@ function generateHtmlReport(data) {
             const tablesContainer = document.getElementById('tablesContainer');
             const searchInput = document.getElementById('searchInput');
 
+            // Utility function for human-readable bytes
+            const bytesHuman = function (bytes, dp = 2, si = true) {
+                //https://stackoverflow.com/a/14919494
+                const thresh = si ? 1000 : 1024;
+
+                if (Math.abs(bytes) < thresh) {
+                    return bytes + ' B';
+                }
+
+                const units = si ? ['kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'] : ['KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'];
+                let u = -1;
+                const r = 10 ** dp;
+
+                do {
+                    bytes /= thresh;
+                    ++u;
+                } while (Math.round(Math.abs(bytes) * r) / r >= thresh && u < units.length - 1);
+
+                return bytes.toFixed(dp) + ' ' + units[u];
+            };
+
             function renderSummary() {
                 document.getElementById('headerProject').textContent = data.audit_metadata.project_id;
                 document.getElementById('headerDataset').textContent = data.audit_metadata.dataset_id;
@@ -338,6 +364,22 @@ function generateHtmlReport(data) {
                 document.getElementById('summaryTables').textContent = data.summary.total_tables.toLocaleString();
                 document.getElementById('summaryViews').textContent = data.summary.total_views.toLocaleString();
                 document.getElementById('summaryFailedObjects').textContent = data.summary.failed_objects.toLocaleString();
+                
+                // Calculate total rows and size
+                let totalRows = 0;
+                let totalBytes = 0;
+                
+                data.tables.forEach(table => {
+                    if (table.row_count && typeof table.row_count === 'number') {
+                        totalRows += table.row_count;
+                    }
+                    if (table.size_mb && typeof table.size_mb === 'number') {
+                        totalBytes += table.size_mb * 1024 * 1024; // Convert MB to bytes
+                    }
+                });
+                
+                document.getElementById('summaryTotalRows').textContent = totalRows.toLocaleString();
+                document.getElementById('summaryTotalSize').textContent = bytesHuman(totalBytes);
             }
 
             function formatValue(value) {
@@ -401,8 +443,28 @@ function generateHtmlReport(data) {
                     }
                     let sampleHtml = '';
                     if (table.sample_data && table.sample_data.length > 0) {
-                        // Show JSON format for sample data
-                        sampleHtml = \`<div class="sample-json">\${JSON.stringify(table.sample_data, null, 2)}</div>\`;
+                        // Clean and format sample data for better display
+                        const cleanSampleData = table.sample_data.map(row => {
+                            const cleanRow = {};
+                            Object.keys(row).forEach(key => {
+                                let value = row[key];
+                                // Handle BigQuery special values and types
+                                if (value === null || value === undefined) {
+                                    cleanRow[key] = null;
+                                } else if (typeof value === 'object' && value !== null) {
+                                    // For complex objects, stringify them properly
+                                    cleanRow[key] = value;
+                                } else if (typeof value === 'string' && value.trim() === '') {
+                                    cleanRow[key] = '(empty string)';
+                                } else {
+                                    cleanRow[key] = value;
+                                }
+                            });
+                            return cleanRow;
+                        });
+                        
+                        // Show JSON format for sample data with better formatting
+                        sampleHtml = \`<div class="sample-json">\${JSON.stringify(cleanSampleData, null, 2)}</div>\`;
                     } else if (table.sample_data_error) {
                         sampleHtml = \`<div class="error-message">\${table.sample_data_error}</div>\`;
                     } else {
@@ -533,7 +595,7 @@ function generateHtmlReport(data) {
                 const sizeData = data.tables
                     .filter(t => t.size_mb > 0)
                     .sort((a, b) => b.size_mb - a.size_mb)
-                    .slice(0, 10); // Top 10 largest tables
+                    .slice(0, 15); // Top 15 largest tables
                 
                 new Chart(document.getElementById('sizeChart'), {
                     type: 'bar',
@@ -551,20 +613,21 @@ function generateHtmlReport(data) {
                         responsive: false,
                         maintainAspectRatio: false,
                         animation: false,
+                        indexAxis: 'y', // This makes it horizontal
                         plugins: {
                             legend: { display: false }
                         },
                         scales: {
-                            y: {
+                            x: {
                                 beginAtZero: true,
                                 grid: { color: '#2c3a54' },
                                 ticks: { color: '#a3b3cc' }
                             },
-                            x: {
+                            y: {
                                 grid: { color: '#2c3a54' },
                                 ticks: { 
                                     color: '#a3b3cc',
-                                    maxRotation: 45
+                                    font: { size: 11 }
                                 }
                             }
                         }
@@ -575,7 +638,7 @@ function generateHtmlReport(data) {
                 const rowData = data.tables
                     .filter(t => t.row_count > 0)
                     .sort((a, b) => b.row_count - a.row_count)
-                    .slice(0, 10);
+                    .slice(0, 15);
                 
                 new Chart(document.getElementById('rowCountChart'), {
                     type: 'bar',
@@ -593,11 +656,12 @@ function generateHtmlReport(data) {
                         responsive: false,
                         maintainAspectRatio: false,
                         animation: false,
+                        indexAxis: 'y', // This makes it horizontal
                         plugins: {
                             legend: { display: false }
                         },
                         scales: {
-                            y: {
+                            x: {
                                 beginAtZero: true,
                                 grid: { color: '#2c3a54' },
                                 ticks: { 
@@ -607,11 +671,11 @@ function generateHtmlReport(data) {
                                     }
                                 }
                             },
-                            x: {
+                            y: {
                                 grid: { color: '#2c3a54' },
                                 ticks: { 
                                     color: '#a3b3cc',
-                                    maxRotation: 45
+                                    font: { size: 11 }
                                 }
                             }
                         }

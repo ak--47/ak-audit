@@ -17,6 +17,28 @@ const config = {
 	tableFilter: process.argv[7] ? process.argv[7].split(",").map(t => t.trim()) : null // Comma-separated list of specific tables to audit
 };
 
+const EXCLUDE_AS_JOIN_KEYS = [
+	"event",
+	"event_name",
+	"event_id",
+	"insert_id",
+	"time",
+	"timestamp",
+	"created_at",
+	"updated_at",
+	"event_time",
+	"_table_suffix",
+	"_partitiontime",
+	"_partitiondate",
+	"distinct_id",
+	"user_id",
+	"email",
+	"client_id",
+	"visit_id",
+	"session_id",
+	"event_definition_id"
+];
+
 console.log(`Running BigQuery Audit with configuration:
   - Project ID: ${config.projectId}
   - Dataset ID: ${config.datasetId}
@@ -48,6 +70,7 @@ const colors = {
 	nc: "\x1b[0m"
 };
 
+
 // --- Utility Functions ---
 const formatRegion = location => {
 	const r = location.toLowerCase();
@@ -55,6 +78,19 @@ const formatRegion = location => {
 		return `region-${r}`;
 	}
 	return r;
+};
+
+// Simple glob pattern matching function
+const matchesGlob = (str, pattern) => {
+	// Convert glob pattern to regex
+	// * matches any characters, ? matches single character
+	const regexPattern = pattern
+		.replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except * and ?
+		.replace(/\*/g, '.*') // Convert * to .*
+		.replace(/\?/g, '.'); // Convert ? to .
+	
+	const regex = new RegExp(`^${regexPattern}$`, 'i'); // Case insensitive
+	return regex.test(str);
 };
 
 const jsonEscape = str => {
@@ -172,16 +208,26 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults 
 							return;
 						}
 
-						if (response.rows) {
+						if (response.rows && response.rows.length > 0) {
 							// Convert BigQuery REST API format to standard row format
 							const schema = response.schema?.fields || [];
 							const rows = response.rows.map(row => {
 								const obj = {};
-								row.f.forEach((field, index) => {
-									if (schema[index]) {
-										obj[schema[index].name] = field.v;
-									}
-								});
+								if (row.f && Array.isArray(row.f)) {
+									row.f.forEach((field, index) => {
+										if (schema[index]) {
+											// Handle BigQuery REST API field values properly
+											let value = field.v;
+											
+											// Handle null/undefined values
+											if (value === null || value === undefined) {
+												obj[schema[index].name] = null;
+											} else {
+												obj[schema[index].name] = value;
+											}
+										}
+									});
+								}
 								return obj;
 							});
 							resolve(rows);
@@ -445,6 +491,12 @@ async function runAudit() {
 	try {
 		if (permissionMode === "jobUser") {
 			console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
+			
+			// Check if any patterns contain glob characters
+			const hasGlobPatterns = config.tableFilter && config.tableFilter.some(pattern => 
+				pattern.includes('*') || pattern.includes('?')
+			);
+			
 			let tablesQuery = `
 	            SELECT 
 	                table_name, 
@@ -454,8 +506,8 @@ async function runAudit() {
 	            FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.TABLES\`
 	            WHERE table_schema = '${config.datasetId}'`;
 
-			// Add table filtering if specified
-			if (config.tableFilter && config.tableFilter.length > 0) {
+			// Add table filtering if specified and no glob patterns
+			if (config.tableFilter && config.tableFilter.length > 0 && !hasGlobPatterns) {
 				const tableList = config.tableFilter.map(t => `'${t}'`).join(",");
 				tablesQuery += ` AND table_name IN (${tableList})`;
 			}
@@ -463,15 +515,42 @@ async function runAudit() {
 			tablesQuery += ` ORDER BY table_type, table_name`;
 
 			const [queryResults] = await bigquery.query({ query: tablesQuery, location: config.location });
-			tables = queryResults;
+			let allTables = queryResults;
+			
+			// Apply glob pattern filtering if needed
+			if (config.tableFilter && config.tableFilter.length > 0 && hasGlobPatterns) {
+				tables = allTables.filter(table => {
+					return config.tableFilter.some(pattern => {
+						// Check if pattern contains glob characters
+						if (pattern.includes('*') || pattern.includes('?')) {
+							return matchesGlob(table.table_name, pattern);
+						} else {
+							// Exact match for non-glob patterns
+							return table.table_name === pattern;
+						}
+					});
+				});
+			} else {
+				tables = allTables;
+			}
 		} else {
 			// dataViewer mode - use REST API
 			console.log(`${colors.yellow}Fetching table list via REST API (dataViewer mode)...${colors.nc}`);
 			const allTables = await getTablesViaREST(config.projectId, config.datasetId);
 
-			// Apply table filtering if specified
+			// Apply table filtering if specified (supports glob patterns)
 			if (config.tableFilter && config.tableFilter.length > 0) {
-				tables = allTables.filter(table => config.tableFilter.includes(table.table_name));
+				tables = allTables.filter(table => {
+					return config.tableFilter.some(pattern => {
+						// Check if pattern contains glob characters
+						if (pattern.includes('*') || pattern.includes('?')) {
+							return matchesGlob(table.table_name, pattern);
+						} else {
+							// Exact match for non-glob patterns
+							return table.table_name === pattern;
+						}
+					});
+				});
 			} else {
 				tables = allTables;
 			}
@@ -496,26 +575,7 @@ async function runAudit() {
 		const allFieldNames = new Map(); // field_name -> Set of table names that have this field
 
 		// Common event fields that should be excluded from join key detection
-		const excludedFieldNames = new Set([
-			"event",
-			"event_name",
-			"event_id",
-			"insert_id",
-			"time",
-			"timestamp",
-			"created_at",
-			"updated_at",
-			"event_time",
-			"_table_suffix",
-			"_partitiontime",
-			"_partitiondate",
-			"distinct_id",
-			"user_id",
-			"email",
-			"client_id",
-			"visit_id",
-			"session_id"
-		]);
+		const excludedFieldNames = new Set(EXCLUDE_AS_JOIN_KEYS);
 
 		// Valid join key data types (BigQuery types)
 		const validJoinKeyTypes = new Set(["STRING", "INT64", "INTEGER", "BIGINT", "SMALLINT", "TINYINT"]);
@@ -1029,6 +1089,8 @@ async function runAudit() {
 	}
 }
 
+
 if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
 	runAudit();
 }
+
