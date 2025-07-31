@@ -41,27 +41,28 @@ npm install
 ### Command Syntax
 
 ```bash
-node bigquery.js [PROJECT_ID] [DATASET_ID] [LOCATION] [OUTPUT_DIR] [SAMPLE_LIMIT] [TABLE_FILTER]
+node bigquery.js [PROJECT_ID] [DATASET_ID] [TABLE_FILTER] [LOCATION] [SAMPLE_LIMIT] [OUTPUT_DIR]
 ```
 
 All parameters are optional and use sensible defaults for quick testing.
 
 ### Parameters
 
-| Parameter | Default | Description | Examples |
-|-----------|---------|-------------|----------|
-| `PROJECT_ID` | `mixpanel-gtm-training` | Your Google Cloud project ID containing the BigQuery dataset | `my-company-prod`, `analytics-dev-123` |
-| `DATASET_ID` | `warehouse_connectors` | The specific BigQuery dataset to audit within the project | `production_data`, `staging_warehouse`, `user_analytics` |
-| `LOCATION` | `US` | BigQuery region where your dataset is located (affects query performance and costs) | `US`, `EU`, `us-central1`, `europe-west1` |
-| `OUTPUT_DIR` | `./output` | Local directory where all audit reports and files will be saved | `./reports`, `~/audit-results`, `/tmp/bq-audit` |
-| `SAMPLE_LIMIT` | `10` | Maximum number of sample data rows to extract from each table | `5`, `25`, `100` (higher values = longer runtime) |
-| `TABLE_FILTER` | `null` (all tables) | Comma-separated list of table names/patterns to audit (supports glob patterns) | `"users,events"`, `"frontend-*"`, `"*_temp,staging_*"` |
+| Parameter | Position | Default | Description | Examples |
+|-----------|----------|---------|-------------|----------|
+| `PROJECT_ID` | 1 | `mixpanel-gtm-training` | Your Google Cloud project ID containing the BigQuery dataset | `my-company-prod`, `analytics-dev-123` |
+| `DATASET_ID` | 2 | `warehouse_connectors` | The specific BigQuery dataset to audit within the project | `production_data`, `staging_warehouse`, `user_analytics` |
+| `TABLE_FILTER` | 3 | `null` (all tables) | Comma-separated list of table names/patterns to audit (supports glob patterns) | `"users,events"`, `"frontend-*"`, `"*_temp,staging_*"` |
+| `LOCATION` | 4 | `US` | BigQuery region where your dataset is located (affects query performance and costs) | `US`, `EU`, `us-central1`, `europe-west1` |
+| `SAMPLE_LIMIT` | 5 | `10` | Maximum number of sample data rows to extract from each table | `5`, `25`, `100` (higher values = longer runtime) |
+| `OUTPUT_DIR` | 6 | `./output` | Local directory where all audit reports and files will be saved | `./reports`, `~/audit-results`, `/tmp/bq-audit` |
 
 **Parameter Notes:**
 - **PROJECT_ID**: Must have BigQuery enabled and proper IAM permissions configured
+- **TABLE_FILTER**: Leave empty to audit all tables, or specify patterns to focus on specific table groups - now positioned early for convenient filtering
 - **LOCATION**: Should match your dataset's location for optimal performance and to avoid cross-region charges
 - **SAMPLE_LIMIT**: Larger values provide more comprehensive data samples but increase processing time and BigQuery costs
-- **TABLE_FILTER**: Leave empty to audit all tables, or specify patterns to focus on specific table groups
+- **OUTPUT_DIR**: Positioned last as it's rarely changed from the default
 
 ### Examples
 
@@ -72,28 +73,28 @@ node bigquery.js
 # Specify your own project and dataset
 node bigquery.js my-company-prod analytics_warehouse
 
-# EU dataset with custom output directory  
-node bigquery.js eu-project-123 user_data EU ./eu-reports
-
-# Production audit with more sample data
-node bigquery.js prod-analytics warehouse US ./prod-audit 50
-
 # Focus on specific tables with exact names
-node bigquery.js my-project my-dataset US ./output 25 "users,events,products"
+node bigquery.js my-project my-dataset "users,events,products"
 
 # Audit tables matching patterns
-node bigquery.js my-project my-dataset US ./output 10 "frontend-*"
-node bigquery.js my-project my-dataset US ./output 10 "backend-*,api_*" 
-node bigquery.js my-project my-dataset US ./output 10 "*_events,*_users"
+node bigquery.js my-project my-dataset "frontend-*"
+node bigquery.js my-project my-dataset "backend-*,api_*" 
+node bigquery.js my-project my-dataset "*_events,*_users"
 
-# Development workflow - quick audit of staging tables
-node bigquery.js dev-project staging_db US ./staging-audit 5 "staging_*"
+# EU dataset with custom location
+node bigquery.js eu-project-123 user_data "" EU
 
-# Mix exact names and patterns for comprehensive audit
-node bigquery.js my-project my-dataset US ./output 15 "core_users,frontend-*,temp_?,*_archive"
+# Production audit with more sample data
+node bigquery.js prod-analytics warehouse "" US 50
 
-# Multi-region setup example
-node bigquery.js global-project emea_data europe-west1 ./emea-reports 20
+# Development workflow - quick audit of staging tables with minimal samples
+node bigquery.js dev-project staging_db "staging_*" US 5
+
+# Mix exact names and patterns for comprehensive audit with custom output
+node bigquery.js my-project my-dataset "core_users,frontend-*,temp_?,*_archive" US 15 ./custom-reports
+
+# Multi-region setup example with custom output directory
+node bigquery.js global-project emea_data "" europe-west1 20 ./emea-reports
 
 # Clean output directory before new audit
 npm run prune
@@ -102,17 +103,20 @@ npm run prune
 **Real-world Usage Patterns:**
 
 ```bash
-# Data team daily review
-node bigquery.js analytics-prod warehouse US ./daily-audit 10 "*_daily,*_summary"
+# Data team daily review - focus on summary tables
+node bigquery.js analytics-prod warehouse "*_daily,*_summary"
 
-# Schema migration planning  
-node bigquery.js staging-project new_schema US ./migration-audit 25
+# Schema migration planning with detailed samples
+node bigquery.js staging-project new_schema "" US 25 ./migration-audit
 
-# Compliance audit - focus on user data tables
-node bigquery.js compliance-db pii_data US ./compliance-reports 5 "*users*,*profiles*,*customer*"
+# Compliance audit - focus on user data tables with minimal samples
+node bigquery.js compliance-db pii_data "*users*,*profiles*,*customer*" US 5 ./compliance-reports
 
-# Performance analysis - large tables only
-node bigquery.js perf-project analytics US ./perf-audit 100 "events_*,logs_*"
+# Performance analysis - large tables only with extensive sampling
+node bigquery.js perf-project analytics "events_*,logs_*" US 100 ./perf-audit
+
+# Quick schema check - no samples needed
+node bigquery.js my-project my-dataset "new_*" US 0 ./schema-check
 ```
 
 ### Table Filtering with Glob Patterns
@@ -366,9 +370,9 @@ bq ls YOUR_PROJECT:YOUR_DATASET
 - **`OUTPUT_DIR`**: Use local SSD paths for faster I/O when processing large datasets
 
 **Execution Strategies:**
-- **Quick Assessment**: `node bigquery.js my-project my-dataset US ./output 5`
-- **Focused Audit**: `node bigquery.js my-project my-dataset US ./output 15 "production_*"`  
-- **Deep Analysis**: `node bigquery.js my-project my-dataset US ./output 50` (JobUser role recommended)
+- **Quick Assessment**: `node bigquery.js my-project my-dataset "" US 5`
+- **Focused Audit**: `node bigquery.js my-project my-dataset "production_*" US 15`  
+- **Deep Analysis**: `node bigquery.js my-project my-dataset "" US 50` (JobUser role recommended)
 
 **Cost & Speed Considerations:**
 - JobUser role provides better performance for large datasets through partition optimization
@@ -382,3 +386,59 @@ bq ls YOUR_PROJECT:YOUR_DATASET
 - `us-central1`, `us-east1` - Specific US regions
 - `europe-west1`, `asia-southeast1` - Specific international regions
 
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes  
+4. Test with different permission modes
+5. Submit a pull request
+
+## Roadmap
+
+- 🔄 **Multi-warehouse support** (Snowflake, Redshift, etc.)
+- 📱 **Mobile-responsive reports**
+- 🔔 **Slack/email notifications**
+- 📅 **Scheduled audits**
+- 🔍 **Data quality checks**
+- 📊 **Historical change tracking**
+
+## Quick Reference
+
+### Command Template
+```bash
+node bigquery.js [PROJECT] [DATASET] [TABLES] [REGION] [SAMPLES] [OUTPUT]
+```
+
+### Common Commands
+```bash
+# Quick audit with defaults
+node bigquery.js
+
+# Production dataset audit with table filtering
+node bigquery.js prod-analytics warehouse "prod_*"
+
+# Focus on specific table group with custom samples
+node bigquery.js my-project my-data "user_*,event_*" US 25
+
+# EU region with detailed sampling and custom output
+node bigquery.js eu-proj analytics "" EU 50 ./eu-audit
+```
+
+### Parameter Quick Reference
+| Param | Position | Purpose | Common Values |
+|-------|----------|---------|---------------|
+| 1 | PROJECT_ID | Project ID | `my-project`, `prod-analytics` |
+| 2 | DATASET_ID | Dataset | `warehouse`, `analytics`, `staging` |  
+| 3 | TABLE_FILTER | Table Filter | `"users"`, `"prod_*"`, `"*_temp"`, `""` |
+| 4 | LOCATION | Region | `US`, `EU`, `us-central1` |
+| 5 | SAMPLE_LIMIT | Sample Rows | `5`, `10`, `25`, `50` |
+| 6 | OUTPUT_DIR | Output Dir | `./output`, `./reports` |
+
+## License
+
+MIT License - see LICENSE file for details.
+
+---
+
+**Built for humans who need to understand their data warehouse at scale.** 🚀

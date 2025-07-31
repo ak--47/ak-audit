@@ -7,7 +7,6 @@ function generateHtmlReport(data) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BigQuery Dataset Audit Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <style>
         :root {
@@ -153,6 +152,10 @@ function generateHtmlReport(data) {
         .join-key-row { background-color: rgba(120, 86, 255, 0.1); }
         .join-key-cell { color: var(--accent); font-weight: 600; }
         .sample-json { background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.85rem; color: var(--text-secondary); max-height: 400px; overflow: auto; white-space: pre-wrap; }
+        .sample-section { margin-top: 20px; }
+        .sample-toggle { color: var(--mint-100); font-weight: 600; margin: 20px 0 10px; transition: color 0.2s ease; }
+        .sample-toggle:hover { color: var(--text-primary); }
+        .sample-expand-icon { color: var(--mint-100); }
         .analytics-section { margin-bottom: 40px; }
         .charts-grid { 
             display: grid; 
@@ -169,7 +172,60 @@ function generateHtmlReport(data) {
             border-radius: 12px; 
             padding: 20px; 
             position: relative;
-            min-height: 300px;
+            height: 380px;
+            overflow: hidden;
+        }
+        .d3-chart {
+            width: 100%;
+            height: calc(100% - 40px);
+        }
+        .d3-bar {
+            transition: opacity 0.2s ease;
+        }
+        .d3-bar:hover {
+            opacity: 0.8;
+        }
+        .d3-axis-text {
+            fill: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 11px;
+            font-weight: 400;
+        }
+        .d3-axis-label {
+            fill: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .d3-grid-line {
+            stroke: rgba(44, 58, 84, 0.3);
+            stroke-width: 1;
+        }
+        .d3-tooltip {
+            position: absolute;
+            background: rgba(26, 36, 51, 0.95);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-family: 'Inter', sans-serif;
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .d3-pie-slice {
+            transition: transform 0.2s ease;
+        }
+        .d3-pie-slice:hover {
+            transform: scale(1.05);
+        }
+        .d3-legend {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            fill: var(--text-secondary);
         }
         .chart-title { 
             color: var(--text-primary); 
@@ -276,20 +332,20 @@ function generateHtmlReport(data) {
             <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">📊 Table Analytics</h2>
             <div class="charts-grid">
                 <div class="chart-container full-width">
-                    <div class="chart-title">Table Size Distribution (Top 15)</div>
-                    <canvas id="sizeChart"></canvas>
+                    <div class="chart-title">Row Count Distribution (Top 15)</div>
+                    <svg id="rowCountChart" class="d3-chart"></svg>
                 </div>
                 <div class="chart-container full-width">
-                    <div class="chart-title">Row Count Distribution (Top 15)</div>
-                    <canvas id="rowCountChart"></canvas>
+                    <div class="chart-title">Table Size Distribution (Top 15)</div>
+                    <svg id="sizeChart" class="d3-chart"></svg>
                 </div>
                 <div class="chart-container">
                     <div class="chart-title">Table Types</div>
-                    <canvas id="tableTypeChart"></canvas>
+                    <svg id="tableTypeChart" class="d3-chart"></svg>
                 </div>
                 <div class="chart-container">
                     <div class="chart-title">Partitioned vs Non-Partitioned</div>
-                    <canvas id="partitionChart"></canvas>
+                    <svg id="partitionChart" class="d3-chart"></svg>
                 </div>
             </div>
         </section>
@@ -495,8 +551,15 @@ function generateHtmlReport(data) {
                                 \${viewDefHtml}
                                 <h4>Schema</h4>
                                 \${schemaHtml}
-                                <h4>Sample Data (10 rows)</h4>
-                                \${sampleHtml}
+                                <div class="sample-section">
+                                    <h4 class="sample-toggle" style="cursor: pointer; display: flex; align-items: center; user-select: none;">
+                                        <svg class="sample-expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px; transition: transform 0.2s ease;"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        Sample Data (10 rows)
+                                    </h4>
+                                    <div class="sample-content" style="display: none; margin-top: 10px;">
+                                        \${sampleHtml}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     \`;
@@ -527,26 +590,72 @@ function generateHtmlReport(data) {
                     if (header) {
                         header.parentElement.classList.toggle('expanded');
                     }
+                    
+                    // Sample data toggle functionality
+                    const sampleToggle = e.target.closest('.sample-toggle');
+                    if (sampleToggle) {
+                        e.stopPropagation(); // Prevent table expansion
+                        const sampleSection = sampleToggle.closest('.sample-section');
+                        const sampleContent = sampleSection.querySelector('.sample-content');
+                        const expandIcon = sampleSection.querySelector('.sample-expand-icon');
+                        
+                        if (sampleContent.style.display === 'none') {
+                            sampleContent.style.display = 'block';
+                            expandIcon.style.transform = 'rotate(90deg)';
+                        } else {
+                            sampleContent.style.display = 'none';
+                            expandIcon.style.transform = 'rotate(0deg)';
+                        }
+                    }
                 });
                 
-                // Enhanced search functionality
+                // Enhanced search functionality with deep schema filtering
                 searchInput.addEventListener('input', e => {
-                    const searchTerm = e.target.value.toLowerCase();
+                    const searchTerm = e.target.value.toLowerCase().trim();
                     let hasVisibleItems = false;
                     
                     document.querySelectorAll('.table-item').forEach(item => {
                         const tableName = item.dataset.name;
                         let shouldShow = false;
+                        let hasMatchingRows = false;
                         
-                        // Search in table name
-                        if (tableName.includes(searchTerm)) {
+                        if (!searchTerm) {
+                            // No search term - show all tables and reset row visibility
                             shouldShow = true;
-                        }
-                        
-                        // Search in table content (schema fields)
-                        if (!shouldShow && searchTerm) {
-                            const tableContent = item.textContent.toLowerCase();
-                            shouldShow = tableContent.includes(searchTerm);
+                            item.querySelectorAll('tr').forEach(row => {
+                                row.style.display = '';
+                            });
+                            item.classList.remove('expanded'); // Collapse when clearing search
+                        } else {
+                            // Search in table name
+                            if (tableName.includes(searchTerm)) {
+                                shouldShow = true;
+                                // Show all rows when table name matches
+                                item.querySelectorAll('tr').forEach(row => {
+                                    row.style.display = '';
+                                });
+                            } else {
+                                // Deep search in schema rows
+                                const schemaTable = item.querySelector('table');
+                                if (schemaTable) {
+                                    const rows = schemaTable.querySelectorAll('tbody tr');
+                                    rows.forEach(row => {
+                                        const rowText = row.textContent.toLowerCase();
+                                        if (rowText.includes(searchTerm)) {
+                                            row.style.display = '';
+                                            hasMatchingRows = true;
+                                        } else {
+                                            row.style.display = 'none';
+                                        }
+                                    });
+                                    
+                                    if (hasMatchingRows) {
+                                        shouldShow = true;
+                                        // Auto-expand tables with matching schema rows
+                                        item.classList.add('expanded');
+                                    }
+                                }
+                            }
                         }
                         
                         item.style.display = shouldShow ? '' : 'none';
@@ -562,200 +671,267 @@ function generateHtmlReport(data) {
             }
 
             function renderCharts() {
-                // Chart.js default colors in dark theme
-                Chart.defaults.color = '#a3b3cc';
-                Chart.defaults.backgroundColor = 'rgba(120, 86, 255, 0.8)';
-                Chart.defaults.borderColor = '#2c3a54';
-                Chart.defaults.plugins.legend.labels.color = '#a3b3cc';
+                // Create tooltip div for D3 charts
+                const tooltip = d3.select('body')
+                    .selectAll('.d3-tooltip')
+                    .data([0])
+                    .join('div')
+                    .attr('class', 'd3-tooltip');
 
-                // Destroy existing chart instances and reset canvas elements to prevent memory leaks and growing charts
-                const existingCharts = ['sizeChart', 'rowCountChart', 'tableTypeChart', 'partitionChart'];
-                existingCharts.forEach(chartId => {
-                    const existingChart = Chart.getChart(chartId);
-                    if (existingChart) {
-                        existingChart.destroy();
-                    }
-                    
-                    // Reset the canvas element completely with fixed dimensions
-                    const canvas = document.getElementById(chartId);
-                    if (canvas) {
-                        const parent = canvas.parentNode;
-                        const newCanvas = document.createElement('canvas');
-                        newCanvas.id = chartId;
-                        // Set explicit canvas size to prevent growing
-                        newCanvas.width = 400;
-                        newCanvas.height = 300;
-                        newCanvas.style.width = '100%';
-                        newCanvas.style.height = '300px';
-                        parent.replaceChild(newCanvas, canvas);
-                    }
-                });
+                // Clear existing charts
+                d3.selectAll('.d3-chart').selectAll('*').remove();
 
-                // Table Size Distribution
-                const sizeData = data.tables
-                    .filter(t => t.size_mb > 0)
-                    .sort((a, b) => b.size_mb - a.size_mb)
-                    .slice(0, 15); // Top 15 largest tables
-                
-                new Chart(document.getElementById('sizeChart'), {
-                    type: 'bar',
-                    data: {
-                        labels: sizeData.map(t => t.table_name),
-                        datasets: [{
-                            label: 'Size (MB)',
-                            data: sizeData.map(t => t.size_mb),
-                            backgroundColor: 'rgba(120, 86, 255, 0.6)',
-                            borderColor: 'rgba(120, 86, 255, 1)',
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: false,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        indexAxis: 'y', // This makes it horizontal
-                        plugins: {
-                            legend: { display: false }
-                        },
-                        scales: {
-                            x: {
-                                beginAtZero: true,
-                                grid: { color: '#2c3a54' },
-                                ticks: { color: '#a3b3cc' }
-                            },
-                            y: {
-                                grid: { color: '#2c3a54' },
-                                ticks: { 
-                                    color: '#a3b3cc',
-                                    font: { size: 11 }
-                                }
-                            }
-                        }
-                    }
-                });
-
-                // Row Count Distribution  
-                const rowData = data.tables
-                    .filter(t => t.row_count > 0)
-                    .sort((a, b) => b.row_count - a.row_count)
+                // Row Count Distribution (D3 Bar Chart)
+                const rowCountData = data.tables
+                    .filter(function(t) { return t.row_count > 0; })
+                    .sort(function(a, b) { return b.row_count - a.row_count; })
                     .slice(0, 15);
                 
-                new Chart(document.getElementById('rowCountChart'), {
-                    type: 'bar',
-                    data: {
-                        labels: rowData.map(t => t.table_name),
-                        datasets: [{
-                            label: 'Row Count',
-                            data: rowData.map(t => t.row_count),
-                            backgroundColor: 'rgba(7, 176, 150, 0.6)',
-                            borderColor: 'rgba(7, 176, 150, 1)',
-                            borderWidth: 1
-                        }]
+                renderD3BarChart('rowCountChart', rowCountData, {
+                    valueAccessor: function(d) { return d.row_count; },
+                    labelAccessor: function(d) { return d.table_name; },
+                    color: 'rgba(7, 176, 150, 0.8)',
+                    formatValue: function(d) {
+                        if (d >= 1000000) return (d / 1000000).toFixed(1) + 'M';
+                        if (d >= 1000) return (d / 1000).toFixed(1) + 'K';
+                        return d.toLocaleString();
                     },
-                    options: {
-                        responsive: false,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        indexAxis: 'y', // This makes it horizontal
-                        plugins: {
-                            legend: { display: false }
-                        },
-                        scales: {
-                            x: {
-                                beginAtZero: true,
-                                grid: { color: '#2c3a54' },
-                                ticks: { 
-                                    color: '#a3b3cc',
-                                    callback: function(value) {
-                                        return value.toLocaleString();
-                                    }
-                                }
-                            },
-                            y: {
-                                grid: { color: '#2c3a54' },
-                                ticks: { 
-                                    color: '#a3b3cc',
-                                    font: { size: 11 }
-                                }
-                            }
-                        }
-                    }
+                    tooltipLabel: 'Rows'
                 });
 
-                // Table Types
+                // Table Size Distribution (D3 Bar Chart)
+                const sizeData = data.tables
+                    .filter(function(t) { return t.size_mb > 0; })
+                    .sort(function(a, b) { return b.size_mb - a.size_mb; })
+                    .slice(0, 15);
+                
+                renderD3BarChart('sizeChart', sizeData, {
+                    valueAccessor: function(d) { return d.size_mb; },
+                    labelAccessor: function(d) { return d.table_name; },
+                    color: 'rgba(120, 86, 255, 0.8)',
+                    formatValue: function(d) { return d.toFixed(1) + ' MB'; },
+                    tooltipLabel: 'Size'
+                });
+
+                
+
+                // Table Types (D3 Pie Chart)
                 const typeCounts = data.tables.reduce((acc, table) => {
                     acc[table.table_type] = (acc[table.table_type] || 0) + 1;
                     return acc;
                 }, {});
-
-                new Chart(document.getElementById('tableTypeChart'), {
-                    type: 'doughnut',
-                    data: {
-                        labels: Object.keys(typeCounts),
-                        datasets: [{
-                            data: Object.values(typeCounts),
-                            backgroundColor: [
-                                'rgba(120, 86, 255, 0.8)',
-                                'rgba(7, 176, 150, 0.8)',
-                                'rgba(248, 188, 59, 0.8)'
-                            ],
-                            borderColor: [
-                                'rgba(120, 86, 255, 1)',
-                                'rgba(7, 176, 150, 1)',
-                                'rgba(248, 188, 59, 1)'
-                            ],
-                            borderWidth: 2
-                        }]
-                    },
-                    options: {
-                        responsive: false,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                                labels: { color: '#a3b3cc' }
-                            }
-                        }
+                
+                const typeData = Object.entries(typeCounts).map(function(entry) { return { label: entry[0], value: entry[1] }; });
+                renderD3PieChart('tableTypeChart', typeData, {
+                    colors: {
+                        'BASE TABLE': 'rgba(120, 86, 255, 0.8)',
+                        'MATERIALIZED VIEW': 'rgba(7, 176, 150, 0.8)', 
+                        'VIEW': 'rgba(248, 188, 59, 0.8)'
                     }
                 });
 
-                // Partitioned vs Non-Partitioned
+                // Partitioned vs Non-Partitioned (D3 Pie Chart)
                 const partitionCounts = data.tables.reduce((acc, table) => {
                     const isPartitioned = table.partition_info && table.partition_info.length > 0;
                     acc[isPartitioned ? 'Partitioned' : 'Non-Partitioned'] = (acc[isPartitioned ? 'Partitioned' : 'Non-Partitioned'] || 0) + 1;
                     return acc;
                 }, {});
-
-                new Chart(document.getElementById('partitionChart'), {
-                    type: 'pie',
-                    data: {
-                        labels: Object.keys(partitionCounts),
-                        datasets: [{
-                            data: Object.values(partitionCounts),
-                            backgroundColor: [
-                                'rgba(120, 86, 255, 0.8)',
-                                'rgba(255, 117, 87, 0.8)'
-                            ],
-                            borderColor: [
-                                'rgba(120, 86, 255, 1)',
-                                'rgba(255, 117, 87, 1)'
-                            ],
-                            borderWidth: 2
-                        }]
-                    },
-                    options: {
-                        responsive: false,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                                labels: { color: '#a3b3cc' }
-                            }
-                        }
+                
+                const partitionData = Object.entries(partitionCounts).map(function(entry) { return { label: entry[0], value: entry[1] }; });
+                renderD3PieChart('partitionChart', partitionData, {
+                    colors: {
+                        'Partitioned': 'rgba(120, 86, 255, 0.8)',
+                        'Non-Partitioned': 'rgba(255, 117, 87, 0.8)'
                     }
                 });
+            }
+
+            // D3 Bar Chart Renderer
+            function renderD3BarChart(elementId, data, options) {
+                const svg = d3.select('#' + elementId);
+                const container = svg.node().parentNode;
+                const margin = { top: 20, right: 20, bottom: 40, left: 120 };
+                const width = container.clientWidth - margin.left - margin.right;
+                const height = 300 - margin.top - margin.bottom;
+                
+                svg.attr('width', container.clientWidth)
+                   .attr('height', 300);
+                
+                const g = svg.append('g')
+                    .attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+                
+                // Scales
+                const xScale = d3.scaleLinear()
+                    .domain([0, d3.max(data, function(d) { return options.valueAccessor(d); })])
+                    .range([0, width]);
+                
+                const yScale = d3.scaleBand()
+                    .domain(data.map(function(d) { return options.labelAccessor(d); }))
+                    .range([0, height])
+                    .padding(0.15);
+                
+                // Grid lines
+                g.selectAll('.d3-grid-line')
+                    .data(xScale.ticks(6))
+                    .join('line')
+                    .attr('class', 'd3-grid-line')
+                    .attr('x1', function(d) { return xScale(d); })
+                    .attr('x2', function(d) { return xScale(d); })
+                    .attr('y1', 0)
+                    .attr('y2', height);
+                
+                // Bars
+                const tooltip = d3.select('.d3-tooltip');
+                
+                const bars = g.selectAll('.d3-bar')
+                    .data(data)
+                    .join('rect')
+                    .attr('class', 'd3-bar')
+                    .attr('x', 0)
+                    .attr('y', function(d) { return yScale(options.labelAccessor(d)); })
+                    .attr('width', function(d) { return xScale(options.valueAccessor(d)); })
+                    .attr('height', yScale.bandwidth())
+                    .attr('fill', options.color)
+                    .attr('rx', 4)
+                    .attr('ry', 4)
+                    .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))')
+                    .on('mouseover', function(event, d) {
+                        d3.select(this).style('filter', 'drop-shadow(0 4px 8px rgba(0,0,0,0.4)) brightness(1.1)');
+                        tooltip.style('opacity', 1)
+                            .html('<strong>' + options.labelAccessor(d) + '</strong><br/>' + options.tooltipLabel + ': ' + options.formatValue(options.valueAccessor(d)))
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                    })
+                    .on('mousemove', function(event) {
+                        tooltip.style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                    })
+                    .on('mouseout', function() {
+                        d3.select(this).style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
+                        tooltip.style('opacity', 0);
+                    });
+                
+                // Add value labels on bars for better readability
+                g.selectAll('.d3-bar-label')
+                    .data(data)
+                    .join('text')
+                    .attr('class', 'd3-bar-label')
+                    .attr('x', function(d) { return xScale(options.valueAccessor(d)) + 8; })
+                    .attr('y', function(d) { return yScale(options.labelAccessor(d)) + yScale.bandwidth() / 2; })
+                    .attr('dy', '0.35em')
+                    .style('fill', 'var(--text-secondary)')
+                    .style('font-family', 'Inter, sans-serif')
+                    .style('font-size', '11px')
+                    .style('font-weight', '500')
+                    .text(function(d) { return options.formatValue(options.valueAccessor(d)); });
+                
+                // X Axis
+                const xAxis = g.append('g')
+                    .attr('transform', 'translate(0,' + height + ')')
+                    .call(d3.axisBottom(xScale)
+                        .ticks(6)
+                        .tickFormat(options.formatValue));
+                
+                xAxis.selectAll('text')
+                    .attr('class', 'd3-axis-text');
+                
+                xAxis.selectAll('line')
+                    .style('stroke', 'var(--text-secondary)')
+                    .style('opacity', 0.3);
+                
+                xAxis.select('.domain')
+                    .style('stroke', 'var(--text-secondary)')
+                    .style('opacity', 0.3);
+                
+                // Y Axis
+                const yAxis = g.append('g')
+                    .call(d3.axisLeft(yScale)
+                        .tickFormat(function(d) { return d.length > 17 ? d.substring(0, 17) + '...' : d; }));
+                
+                yAxis.selectAll('text')
+                    .attr('class', 'd3-axis-text')
+                    .style('cursor', 'default');
+                
+                yAxis.selectAll('line')
+                    .style('stroke', 'var(--text-secondary)')
+                    .style('opacity', 0.3);
+                
+                yAxis.select('.domain')
+                    .style('stroke', 'var(--text-secondary)')
+                    .style('opacity', 0.3);
+            }
+
+            // D3 Pie Chart Renderer
+            function renderD3PieChart(elementId, data, options) {
+                const svg = d3.select('#' + elementId);
+                const container = svg.node().parentNode;
+                const width = container.clientWidth;
+                const height = 300;
+                const radius = Math.min(width, height) / 2 - 40;
+                
+                svg.attr('width', width)
+                   .attr('height', height);
+                
+                const g = svg.append('g')
+                    .attr('transform', 'translate(' + (width/2) + ',' + (height/2 - 20) + ')');
+                
+                // Pie generator
+                const pie = d3.pie()
+                    .value(function(d) { return d.value; })
+                    .sort(null);
+                
+                const arc = d3.arc()
+                    .innerRadius(radius * 0.6)
+                    .outerRadius(radius);
+                
+                const tooltip = d3.select('.d3-tooltip');
+                const total = d3.sum(data, function(d) { return d.value; });
+                
+                // Pie slices
+                g.selectAll('.d3-pie-slice')
+                    .data(pie(data))
+                    .join('path')
+                    .attr('class', 'd3-pie-slice')
+                    .attr('d', arc)
+                    .attr('fill', function(d) { return options.colors[d.data.label] || 'rgba(120, 86, 255, 0.8)'; })
+                    .attr('stroke', 'rgba(255, 255, 255, 0.1)')
+                    .attr('stroke-width', 2)
+                    .on('mouseover', function(event, d) {
+                        const percentage = Math.round((d.data.value / total) * 100);
+                        tooltip.style('opacity', 1)
+                            .html('<strong>' + d.data.label + '</strong><br/>' + d.data.value + ' (' + percentage + '%)')
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                    })
+                    .on('mousemove', function(event) {
+                        tooltip.style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                    })
+                    .on('mouseout', function() {
+                        tooltip.style('opacity', 0);
+                    });
+                
+                // Legend
+                const legend = svg.append('g')
+                    .attr('class', 'd3-legend')
+                    .attr('transform', 'translate(20, ' + (height - 30) + ')');
+                
+                const legendItems = legend.selectAll('.legend-item')
+                    .data(data)
+                    .join('g')
+                    .attr('class', 'legend-item')
+                    .attr('transform', function(d, i) { return 'translate(' + (i * 120) + ', 0)'; });
+                
+                legendItems.append('circle')
+                    .attr('r', 6)
+                    .attr('fill', function(d) { return options.colors[d.label] || 'rgba(120, 86, 255, 0.8)'; });
+                
+                legendItems.append('text')
+                    .attr('x', 12)
+                    .attr('y', 0)
+                    .attr('dy', '0.35em')
+                    .attr('class', 'd3-legend')
+                    .text(function(d) { return d.label; });
             }
 
             function renderLineage() {

@@ -10,11 +10,11 @@ let { NODE_ENV = "production" } = process.env;
 // --- Configuration ---
 const config = {
 	projectId: process.argv[2] || "mixpanel-gtm-training",
-	datasetId: process.argv[3] || "warehouse_connectors",
-	location: process.argv[4] || "US",
-	outputDir: process.argv[5] || "./output",
+	datasetId: process.argv[3] || "warehouse_connectors", 
+	tableFilter: process.argv[4] ? process.argv[4].split(",").map(t => t.trim()) : null, // Comma-separated list of specific tables to audit (supports glob patterns)
+	location: process.argv[5] || "US",
 	sampleLimit: parseInt(process.argv[6]) || 10,
-	tableFilter: process.argv[7] ? process.argv[7].split(",").map(t => t.trim()) : null // Comma-separated list of specific tables to audit
+	outputDir: process.argv[7] || "./output"
 };
 
 const EXCLUDE_AS_JOIN_KEYS = [
@@ -39,13 +39,13 @@ const EXCLUDE_AS_JOIN_KEYS = [
 	"event_definition_id"
 ];
 
-console.log(`Running BigQuery Audit with configuration:
+console.log(`\n\nRunning BigQuery Audit with configuration:\n
   - Project ID: ${config.projectId}
   - Dataset ID: ${config.datasetId}
-  - Location: ${config.location}
-  - Output Directory: ${config.outputDir}
-  - Sample Limit: ${config.sampleLimit}
   - Table Filter: ${config.tableFilter ? config.tableFilter.join(", ") : "All tables"}
+  - Location: ${config.location}
+  - Sample Limit: ${config.sampleLimit}
+  - Output Directory: ${config.outputDir}
 \n`);
 
 const bigquery = new BigQuery({
@@ -434,6 +434,9 @@ async function runAudit() {
 	console.log(`${colors.green}▸ Project:${colors.nc}          ${config.projectId}`);
 	console.log(`${colors.green}▸ Dataset:${colors.nc}          ${config.datasetId}`);
 	console.log(`${colors.green}▸ Region:${colors.nc}           ${config.location}`);
+	console.log(`${colors.green}▸ Table Filter:${colors.nc}    ${config.tableFilter ? config.tableFilter.join(", ") : "All tables"}`);
+	console.log(`${colors.green}▸ Sample Limit:${colors.nc}     ${config.sampleLimit}`);
+	console.log(`${colors.green}▸ Permission Mode:${colors.nc}  ${permissionMode === "jobUser" ? "JobUser (query access)" : "DataViewer (REST API only)"}`);	
 	console.log(`${colors.green}▸ Output Directory:${colors.nc} ${config.outputDir}`);
 	console.log("-------------------------------------------\n");
 
@@ -447,7 +450,7 @@ async function runAudit() {
 		console.log(`${colors.green}✓ Output directories created:${colors.nc}`);
 		console.log(`  - ${path.join(config.outputDir, "reports")} (aggregated reports)`);
 		console.log(`  - ${path.join(config.outputDir, "schemas")} (individual table schemas)`);
-		console.log(`  - ${path.join(config.outputDir, "samples")} (sample data files)\\n`);
+		console.log(`  - ${path.join(config.outputDir, "samples")} (sample data files)\n`);
 	} catch (error) {
 		console.error(`${colors.red}Fatal Error: Could not manage output directory. ${error.message}${colors.nc}`);
 		process.exit(1);
