@@ -4,3 +4,4 @@ output/*
 .vscode
 .DS_Store
 CLAUDE.md
+output.zip

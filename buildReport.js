@@ -351,27 +351,57 @@ function generateHtmlReport(data) {
         </section>
         
         <section class="lineage-section">
-            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🔗 Entity Relationship Diagram & Data Lineage</h2>
-            <div class="lineage-container">
-                <div class="lineage-controls">
-                    <button id="resetZoom">Reset View</button>
-                    <button id="fitToView">Fit to View</button>
-                    <span style="color: var(--text-secondary); font-size: 0.9rem; margin-left: 15px;">
-                        Drag to pan • Scroll to zoom • Click nodes to highlight connections
-                    </span>
-                    <div style="margin-left: auto; display: flex; gap: 15px; font-size: 0.85rem; color: var(--text-secondary);">
-                        <span><span style="display:inline-block;width:15px;height:2px;background:rgba(248,188,59,0.8);margin-right:5px;"></span>View Dependencies</span>
-                        <span><span style="display:inline-block;width:15px;height:2px;background:rgba(7,176,150,0.6);border:1px dashed rgba(7,176,150,0.6);margin-right:5px;"></span>Join Keys</span>
+            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🔗 Table Relationships & Join Key Analysis</h2>
+            
+            <!-- Relationship Summary Cards -->
+            <div class="relationship-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);" id="totalJoinKeys">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Potential Join Keys</div>
+                </div>
+                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--mint-150);" id="connectedTables">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Connected Tables</div>
+                </div>
+                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--mustard-100);" id="viewDependencies">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">View Dependencies</div>
+                </div>
+            </div>
+            
+            <!-- Interactive Network Diagram -->
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="color: var(--mint-100); font-size: 1.1rem; margin: 0;">🌐 Interactive Relationship Diagram</h3>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button id="resetDiagram" style="padding: 4px 8px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Reset</button>
+                            <label style="display: flex; align-items: center; font-size: 0.8rem; color: var(--text-secondary);"><input type="checkbox" id="showLabels" checked style="margin-right: 4px;"> Labels</label>
+                        </div>
+                    </div>
+                    <div style="height: 500px; border-radius: 8px; border: 1px solid var(--border-color); position: relative; overflow: hidden;">
+                        <svg id="networkDiagram" style="width: 100%; height: 100%;"></svg>
+                        <div id="diagramTooltip" style="position: absolute; background: rgba(26, 36, 51, 0.95); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; font-size: 0.85rem; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 1000;"></div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-secondary); display: flex; gap: 20px;">
+                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--accent);border-radius:50%;margin-right:4px;"></span>Tables</span>
+                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--mint-150);border-radius:50%;margin-right:4px;"></span>Views</span>
+                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--mint-150);margin-right:4px;"></span>Join Keys</span>
+                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--mustard-100);margin-right:4px;"></span>Dependencies</span>
                     </div>
                 </div>
-                <svg id="lineageChart" class="lineage-svg">
-                    <defs>
-                        <marker id="arrowhead-view" markerWidth="10" markerHeight="7" 
-                                refX="9" refY="3.5" orient="auto">
-                            <polygon points="0 0, 10 3.5, 0 7" fill="rgba(248, 188, 59, 0.8)" />
-                        </marker>
-                    </defs>
-                </svg>
+                
+                <!-- Analysis Panel -->
+                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">🔍 Analysis</h3>
+                    <div id="selectedNodeInfo" style="margin-bottom: 20px; padding: 12px; background: var(--bg-dark); border-radius: 6px; min-height: 60px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Click a table or view to see details</div>
+                    
+                    <h4 style="color: var(--mint-150); font-size: 0.95rem; margin-bottom: 10px;">🔑 Join Keys</h4>
+                    <div id="joinKeysAnalysis" style="max-height: 200px; overflow-y: auto;"></div>
+                    
+                    <h4 style="color: var(--mustard-100); font-size: 0.95rem; margin: 15px 0 10px 0;">👁️ Dependencies</h4>
+                    <div id="viewDependenciesAnalysis" style="max-height: 150px; overflow-y: auto;"></div>
+                </div>
             </div>
         </section>
         
@@ -936,7 +966,354 @@ function generateHtmlReport(data) {
 
             function renderLineage() {
                 if (!data.lineage || !data.lineage.nodes || data.lineage.nodes.length === 0) {
-                    document.querySelector('.lineage-container').innerHTML = '<p style="text-align: center; color: var(--text-secondary); margin-top: 50px;">No relationships found. Views with table dependencies and tables with shared join keys will appear here.</p>';
+                    const lineageSection = document.querySelector('.lineage-section');
+                    lineageSection.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 50px; background: var(--bg-medium); border-radius: 12px; border: 1px solid var(--border-color);"><h2 style="color: var(--mint-100); margin-bottom: 15px;">🔗 Table Relationships & Join Key Analysis</h2>No relationships found. Views with table dependencies and tables with shared join keys will appear here.</div>';
+                    return;
+                }
+                
+                renderRelationshipSummary();
+                renderJoinKeysAnalysis();
+                renderViewDependenciesAnalysis();
+                renderInteractiveNetworkDiagram();
+                return; // Skip the old chaotic visualization
+            }
+            
+            function renderRelationshipSummary() {
+                const joinKeys = new Set();
+                const connectedTables = new Set();
+                let viewDeps = 0;
+                
+                data.lineage.edges.forEach(function(edge) {
+                    if (edge.type === 'join_key') {
+                        joinKeys.add(edge.label || 'unnamed');
+                        connectedTables.add(edge.source.id);
+                        connectedTables.add(edge.target.id);
+                    } else if (edge.type === 'view_dependency') {
+                        viewDeps++;
+                    }
+                });
+                
+                document.getElementById('totalJoinKeys').textContent = joinKeys.size;
+                document.getElementById('connectedTables').textContent = connectedTables.size;
+                document.getElementById('viewDependencies').textContent = viewDeps;
+            }
+            
+            function renderJoinKeysAnalysis() {
+                const joinKeyMap = {};
+                
+                data.lineage.edges.forEach(function(edge) {
+                    if (edge.type === 'join_key') {
+                        const key = edge.label || 'unnamed';
+                        if (!joinKeyMap[key]) {
+                            joinKeyMap[key] = new Set();
+                        }
+                        joinKeyMap[key].add(edge.source.id);
+                        joinKeyMap[key].add(edge.target.id);
+                    }
+                });
+                
+                const joinKeysDiv = document.getElementById('joinKeysAnalysis');
+                
+                if (Object.keys(joinKeyMap).length === 0) {
+                    joinKeysDiv.innerHTML = '<p style="color: var(--text-secondary); font-style: italic; font-size: 0.85rem;">No join keys found</p>';
+                    return;
+                }
+                
+                let html = '<div style="display: grid; gap: 6px;">';
+                
+                Object.entries(joinKeyMap)
+                    .sort(function(a, b) { return b[1].size - a[1].size; })
+                    .slice(0, 8) // Show top 8
+                    .forEach(function(entry) {
+                        const key = entry[0];
+                        const tables = Array.from(entry[1]);
+                        const connectivity = tables.length;
+                        
+                        let connectivityColor = connectivity >= 4 ? 'var(--lava-100)' : connectivity >= 2 ? 'var(--mustard-100)' : 'var(--text-secondary)';
+                        
+                        html += '<div style="background: var(--bg-dark); border-radius: 4px; padding: 8px; border-left: 3px solid var(--mint-150);">';
+                        html += '<div style="font-weight: 600; color: var(--mint-150); font-size: 0.85rem; margin-bottom: 3px;">' + key + '</div>';
+                        html += '<div style="font-size: 0.75rem; color: var(--text-secondary);">' + connectivity + ' tables</div>';
+                        html += '</div>';
+                    });
+                
+                html += '</div>';
+                joinKeysDiv.innerHTML = html;
+            }
+            
+            function renderInteractiveNetworkDiagram() {
+                const svg = d3.select('#networkDiagram');
+                const container = svg.node().parentNode;
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                const tooltip = d3.select('#diagramTooltip');
+                
+                svg.attr('width', width).attr('height', height);
+                svg.selectAll('*').remove();
+                
+                // Add zoom behavior
+                const zoom = d3.zoom()
+                    .scaleExtent([0.3, 3])
+                    .on('zoom', function(event) {
+                        g.attr('transform', event.transform);
+                    });
+                
+                svg.call(zoom);
+                const g = svg.append('g');
+                
+                // Create a cleaner force simulation
+                const simulation = d3.forceSimulation(data.lineage.nodes)
+                    .force('link', d3.forceLink(data.lineage.edges).id(function(d) { return d.id; }).distance(100).strength(0.5))
+                    .force('charge', d3.forceManyBody().strength(-300))
+                    .force('center', d3.forceCenter(width / 2, height / 2))
+                    .force('collision', d3.forceCollide().radius(30));
+                
+                // Add links
+                const links = g.append('g')
+                    .selectAll('line')
+                    .data(data.lineage.edges)
+                    .join('line')
+                    .attr('stroke', function(d) { return d.type === 'view_dependency' ? 'var(--mustard-100)' : 'var(--mint-150)'; })
+                    .attr('stroke-width', function(d) { return d.type === 'view_dependency' ? 2 : 1; })
+                    .attr('stroke-dasharray', function(d) { return d.type === 'join_key' ? '4,4' : 'none'; })
+                    .attr('opacity', 0.7);
+                
+                // Add link labels for join keys
+                const linkLabels = g.append('g')
+                    .selectAll('text')
+                    .data(data.lineage.edges.filter(function(d) { return d.type === 'join_key' && d.label; }))
+                    .join('text')
+                    .attr('font-size', '10px')
+                    .attr('fill', 'var(--text-secondary)')
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', -2)
+                    .text(function(d) { return d.label; })
+                    .style('pointer-events', 'none');
+                
+                // Add nodes
+                const nodes = g.append('g')
+                    .selectAll('g')
+                    .data(data.lineage.nodes)
+                    .join('g')
+                    .attr('class', 'network-node')
+                    .style('cursor', 'pointer')
+                    .call(d3.drag()
+                        .on('start', function(event, d) {
+                            if (!event.active) simulation.alphaTarget(0.3).restart();
+                            d.fx = d.x;
+                            d.fy = d.y;
+                        })
+                        .on('drag', function(event, d) {
+                            d.fx = event.x;
+                            d.fy = event.y;
+                        })
+                        .on('end', function(event, d) {
+                            if (!event.active) simulation.alphaTarget(0);
+                            d.fx = null;
+                            d.fy = null;
+                        }));
+                
+                // Add circles
+                nodes.append('circle')
+                    .attr('r', function(d) { return Math.max(12, Math.min(20, Math.sqrt(d.row_count / 10000))); })
+                    .attr('fill', function(d) { return d.type === 'VIEW' ? 'var(--mint-150)' : 'var(--accent)'; })
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 2)
+                    .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
+                
+                // Add labels
+                const labels = nodes.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', '0.3em')
+                    .attr('font-size', '9px')
+                    .attr('font-weight', '600')
+                    .attr('fill', 'white')
+                    .style('pointer-events', 'none')
+                    .text(function(d) { return d.id.length > 8 ? d.id.substring(0, 8) + '...' : d.id; });
+                
+                // Add interaction handlers
+                nodes.on('mouseover', function(event, d) {
+                        tooltip.style('opacity', 1)
+                            .html('<strong>' + d.id + '</strong><br/>Type: ' + d.type + '<br/>Rows: ' + d.row_count.toLocaleString() + '<br/>Size: ' + (d.size_mb || 0) + ' MB')
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                    })
+                    .on('mouseout', function() {
+                        tooltip.style('opacity', 0);
+                    })
+                    .on('click', function(event, d) {
+                        showNodeDetails(d);
+                        highlightConnections(d);
+                    });
+                
+                // Simulation tick
+                simulation.on('tick', function() {
+                    links
+                        .attr('x1', function(d) { return d.source.x; })
+                        .attr('y1', function(d) { return d.source.y; })
+                        .attr('x2', function(d) { return d.target.x; })
+                        .attr('y2', function(d) { return d.target.y; });
+                    
+                    linkLabels
+                        .attr('x', function(d) { return (d.source.x + d.target.x) / 2; })
+                        .attr('y', function(d) { return (d.source.y + d.target.y) / 2; });
+                    
+                    nodes.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+                });
+                
+                // Control handlers
+                document.getElementById('resetDiagram').onclick = function() {
+                    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+                    resetHighlighting();
+                };
+                
+                document.getElementById('showLabels').onchange = function() {
+                    const show = this.checked;
+                    labels.style('opacity', show ? 1 : 0);
+                    linkLabels.style('opacity', show ? 1 : 0);
+                };
+                
+                function highlightConnections(selectedNode) {
+                    // Reset all
+                    nodes.select('circle').style('opacity', 0.3);
+                    links.style('opacity', 0.1);
+                    
+                    // Highlight selected node
+                    nodes.filter(function(d) { return d.id === selectedNode.id; })
+                        .select('circle').style('opacity', 1);
+                    
+                    // Find and highlight connected nodes and edges
+                    const connectedNodeIds = new Set([selectedNode.id]);
+                    data.lineage.edges.forEach(function(edge) {
+                        if (edge.source.id === selectedNode.id || edge.target.id === selectedNode.id) {
+                            connectedNodeIds.add(edge.source.id);
+                            connectedNodeIds.add(edge.target.id);
+                        }
+                    });
+                    
+                    nodes.filter(function(d) { return connectedNodeIds.has(d.id); })
+                        .select('circle').style('opacity', 1);
+                    
+                    links.filter(function(d) { return d.source.id === selectedNode.id || d.target.id === selectedNode.id; })
+                        .style('opacity', 1);
+                }
+                
+                function resetHighlighting() {
+                    nodes.select('circle').style('opacity', 1);
+                    links.style('opacity', 0.7);
+                    document.getElementById('selectedNodeInfo').innerHTML = '<div style="text-align: center; color: var(--text-secondary); font-style: italic;">Click a table or view to see details</div>';
+                }
+                
+                function showNodeDetails(node) {
+                    const connectedEdges = data.lineage.edges.filter(function(e) {
+                        return e.source.id === node.id || e.target.id === node.id;
+                    });
+                    
+                    const joinKeys = connectedEdges
+                        .filter(function(e) { return e.type === 'join_key' && e.label; })
+                        .map(function(e) { return e.label; });
+                    
+                    const dependencies = connectedEdges.filter(function(e) { return e.type === 'view_dependency'; });
+                    
+                    let html = '<div style="text-align: left;">';
+                    html += '<h4 style="color: var(--mint-100); margin: 0 0 8px 0; font-size: 1rem;">' + node.id + '</h4>';
+                    html += '<div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px;">' + node.type + ' • ' + node.row_count.toLocaleString() + ' rows</div>';
+                    
+                    if (joinKeys.length > 0) {
+                        html += '<div style="margin-bottom: 8px;"><strong style="color: var(--mint-150); font-size: 0.85rem;">Join Keys:</strong><br/><span style="font-size: 0.8rem; color: var(--text-primary);">' + joinKeys.join(', ') + '</span></div>';
+                    }
+                    
+                    if (dependencies.length > 0) {
+                        html += '<div><strong style="color: var(--mustard-100); font-size: 0.85rem;">Dependencies:</strong><br/>';
+                        dependencies.forEach(function(dep) {
+                            const other = dep.source.id === node.id ? dep.target.id : dep.source.id;
+                            html += '<span style="font-size: 0.8rem; color: var(--text-primary);">' + other + '</span><br/>';
+                        });
+                        html += '</div>';
+                    }
+                    
+                    html += '</div>';
+                    document.getElementById('selectedNodeInfo').innerHTML = html;
+                }
+            }
+            
+            function renderViewDependenciesAnalysis() {
+                const viewDeps = data.lineage.edges.filter(function(e) { return e.type === 'view_dependency'; });
+                const viewDepsDiv = document.getElementById('viewDependenciesAnalysis');
+                
+                if (viewDeps.length === 0) {
+                    viewDepsDiv.innerHTML = '<p style="color: var(--text-secondary); font-style: italic; font-size: 0.85rem;">No view dependencies</p>';
+                    return;
+                }
+                
+                let html = '<div style="display: grid; gap: 4px;">';
+                
+                viewDeps.forEach(function(dep) {
+                    const sourceId = dep.source && dep.source.id ? dep.source.id : (dep.source || 'unknown');
+                    const targetId = dep.target && dep.target.id ? dep.target.id : (dep.target || 'unknown');
+                    
+                    html += '<div style="background: var(--bg-dark); border-radius: 4px; padding: 6px; border-left: 3px solid var(--mustard-100);">';
+                    html += '<div style="font-size: 0.8rem; color: var(--text-primary);">';
+                    html += '<span style="color: var(--mustard-100);">' + targetId + '</span> → <span style="color: var(--mint-150);">' + sourceId + '</span>';
+                    html += '</div>';
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+                viewDepsDiv.innerHTML = html;
+            }
+            
+            function createTableClusters() {
+                const clusters = [];
+                const processed = new Set();
+                
+                data.lineage.nodes.forEach(function(node) {
+                    if (processed.has(node.id) || node.type !== 'TABLE') return;
+                    
+                    const cluster = {
+                        tables: [node.id],
+                        joinKeys: []
+                    };
+                    
+                    // Find all tables connected to this one via join keys
+                    const queue = [node.id];
+                    processed.add(node.id);
+                    
+                    while (queue.length > 0) {
+                        const currentTable = queue.shift();
+                        
+                        data.lineage.edges.forEach(function(edge) {
+                            if (edge.type !== 'join_key') return;
+                            
+                            let otherTable = null;
+                            if (edge.source.id === currentTable && !processed.has(edge.target.id)) {
+                                otherTable = edge.target.id;
+                            } else if (edge.target.id === currentTable && !processed.has(edge.source.id)) {
+                                otherTable = edge.source.id;
+                            }
+                            
+                            if (otherTable) {
+                                cluster.tables.push(otherTable);
+                                processed.add(otherTable);
+                                queue.push(otherTable);
+                                if (edge.label && !cluster.joinKeys.includes(edge.label)) {
+                                    cluster.joinKeys.push(edge.label);
+                                }
+                            }
+                        });
+                    }
+                    
+                    if (cluster.tables.length > 1) {
+                        clusters.push(cluster);
+                    }
+                });
+                
+                return clusters.sort(function(a, b) { return b.tables.length - a.tables.length; });
+            }
+            
+            function oldRenderLineage() {
+                // Old chaotic implementation - keeping for reference but not using
+                if (!data.lineage || !data.lineage.nodes || data.lineage.nodes.length === 0) {
                     return;
                 }
 
