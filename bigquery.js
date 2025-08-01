@@ -140,7 +140,7 @@ const csvEscape = str => {
 async function testBigQueryAuth() {
 	console.log(`${colors.yellow}Testing BigQuery authentication and connectivity...${colors.nc}`);
 	try {
-		const datasets = await bigquery.getDatasets();
+		await bigquery.getDatasets();
 		console.log(`${colors.green}✓ BigQuery authentication successful.${colors.nc}`);
 
 		// Test if we have query permissions (jobUser role)
@@ -174,8 +174,54 @@ async function testBigQueryAuth() {
 	}
 }
 
+// Helper function to recursively unwrap BigQuery REST API field values
+function unwrapBigQueryValue(value) {
+	if (value === null || value === undefined) {
+		return null;
+	}
+	
+	// Handle arrays (REPEATED fields)
+	if (Array.isArray(value)) {
+		return value.map(item => {
+			if (item && typeof item === 'object' && 'v' in item) {
+				return unwrapBigQueryValue(item.v);
+			}
+			return unwrapBigQueryValue(item);
+		});
+	}
+	
+	// Handle objects that might be wrapped values
+	if (typeof value === 'object' && value !== null) {
+		// If it has a 'v' property, unwrap it
+		if ('v' in value) {
+			return unwrapBigQueryValue(value.v);
+		}
+		
+		// Handle STRUCT fields (objects with 'f' property containing field array)
+		if ('f' in value && Array.isArray(value.f)) {
+			const struct = {};
+			// This would need schema information to properly name fields
+			// For now, just unwrap the values
+			value.f.forEach((field, index) => {
+				struct[`field_${index}`] = unwrapBigQueryValue(field);
+			});
+			return struct;
+		}
+		
+		// Regular object - recursively unwrap all properties
+		const unwrapped = {};
+		for (const [key, val] of Object.entries(value)) {
+			unwrapped[key] = unwrapBigQueryValue(val);
+		}
+		return unwrapped;
+	}
+	
+	// Primitive values - return as is
+	return value;
+}
+
 // REST API fallback for sample data when query access is denied
-async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults = 10) {
+async function getSampleDataViaREST(projectId, datasetId, tableName, schema, maxResults = 10) {
 	try {
 		const authClient = await auth.getClient();
 		const accessToken = await authClient.getAccessToken();
@@ -210,20 +256,20 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, maxResults 
 
 						if (response.rows && response.rows.length > 0) {
 							// Convert BigQuery REST API format to standard row format
-							const schema = response.schema?.fields || [];
+							// Use the schema passed as parameter since the data API doesn't include schema
 							const rows = response.rows.map(row => {
 								const obj = {};
 								if (row.f && Array.isArray(row.f)) {
 									row.f.forEach((field, index) => {
-										if (schema[index]) {
-											// Handle BigQuery REST API field values properly
-											let value = field.v;
+										if (schema && schema[index]) {
+											const fieldName = schema[index].column_name || schema[index].name;
 											
 											// Handle null/undefined values
-											if (value === null || value === undefined) {
-												obj[schema[index].name] = null;
+											if (field.v === null || field.v === undefined) {
+												obj[fieldName] = null;
 											} else {
-												obj[schema[index].name] = value;
+												// Properly unwrap nested/repeated field values
+												obj[fieldName] = unwrapBigQueryValue(field.v);
 											}
 										}
 									});
@@ -897,7 +943,7 @@ async function runAudit() {
 					console.log(`${colors.yellow}  └ ⚠ Query failed for sample data, trying REST API fallback...${colors.nc}`);
 					try {
 						// Try REST API fallback for sample data
-						const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, config.sampleLimit);
+						const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, tableData.schema, config.sampleLimit);
 						tableData.sample_data = sampleDataRest;
 						await fs.writeFile(
 							path.join(config.outputDir, "samples", `${table.table_name}.json`),
@@ -915,7 +961,7 @@ async function runAudit() {
 			} else {
 				// dataViewer mode - use REST API directly
 				try {
-					const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, config.sampleLimit);
+					const sampleDataRest = await getSampleDataViaREST(config.projectId, config.datasetId, table.table_name, tableData.schema, config.sampleLimit);
 					tableData.sample_data = sampleDataRest;
 					await fs.writeFile(path.join(config.outputDir, "samples", `${table.table_name}.json`), JSON.stringify(sampleDataRest, null, 2));
 					console.log(`${colors.green}  └ ✓ Sample data retrieved via REST API (${sampleDataRest.length} rows)${colors.nc}`);
