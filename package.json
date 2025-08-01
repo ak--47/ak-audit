@@ -7,7 +7,8 @@
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"prune": "rm -rf ./output/*",
 		"serve": "npx serve ./output/reports",
-		"rebuild": "nodemon rebuild.js"
+		"rebuild": "node rebuild.js",
+		"rebuild:watch": "nodemon rebuild.js"
 	},
 	"keywords": [],
 	"author": "ak@mixpanel.com",

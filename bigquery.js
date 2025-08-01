@@ -93,6 +93,323 @@ const matchesGlob = (str, pattern) => {
 	return regex.test(str);
 };
 
+// Analytics compatibility analysis
+function analyzeAnalyticsCompatibility(tables) {
+	const insights = {
+		mixpanel_ready: [],
+		event_tables: [],
+		user_tables: [],
+		data_quality: [],
+		field_patterns: {
+			timestamp_fields: new Set(),
+			user_id_fields: new Set(),
+			event_id_fields: new Set(),
+			session_fields: new Set()
+		}
+	};
+
+	// Enhanced field pattern detection - prioritize actual data types over field names
+	const validTimestampTypes = new Set(['TIMESTAMP', 'DATETIME', 'DATE', 'TIME']);
+	const timestampFieldNamePatterns = /^(.*timestamp.*|.*time.*|time|event_time|created_at|updated_at|occurred_at|processed_at|date_.*|.*_date|.*_dt)$/i;
+	const userIdPatterns = /^(user_id|userid|user\.id|client_id|clientid|client\.id|distinct_id|distinctid|anonymous_id|anon_id|customer_id|customerid|device_id|deviceid|device\.id|profile_id|profileid|account_id|accountid|member_id|memberid|person_id|personid|identity_id|identityid)$/i;
+	const eventIdPatterns = /^(event_id|eventid|insert_id|insertid|message_id|messageid|uuid|id|row_id|rowid|unique_id|uniqueid|record_id|recordid)$/i;
+	const sessionPatterns = /^(session_id|sessionid|visit_id|visitid|session_uuid|session\.id|visit\.id)$/i;
+	const eventNamePatterns = /^(event|event_name|eventname|event\.name|action|action_name|activity|activity_name)$/i;
+	
+	// Event table patterns - any table with "event" prefix is likely an event table
+	const eventTablePatterns = /^event[_\.]|.*[_\.]event[_\.]|.*events$/i;
+
+	tables.forEach(table => {
+		const analysis = {
+			table_name: table.table_name,
+			table_type: table.table_type,
+			mixpanel_score: 0,
+			analytics_features: {
+				has_timestamp: false,
+				has_user_id: false,
+				has_event_id: false,
+				has_session_id: false,
+				has_event_name: false,
+				timestamp_nullable: true,
+				user_id_nullable: true,
+				event_id_nullable: true
+			},
+			data_quality: {
+				null_rate_estimate: 0,
+				unique_fields: [],
+				potential_pii: []
+			},
+			field_analysis: {},
+			schema_complexity: {
+				total_fields: 0,
+				nested_fields: 0,
+				repeated_fields: 0,
+				struct_fields: 0,
+				complex_types: [],
+				mixpanel_incompatible_fields: []
+			}
+		};
+
+		// Analyze schema fields with enhanced detection
+		(table.schema || []).forEach(field => {
+			const fieldName = field.column_name.toLowerCase();
+			const fieldType = field.nested_type || '';
+			const fieldPath = field.nested_field_path || field.column_name;
+			const isNullable = field.is_nullable === 'YES';
+			const baseType = fieldType.split('(')[0].toUpperCase(); // Remove precision info like NUMERIC(10,2)
+
+			analysis.schema_complexity.total_fields++;
+
+			// Enhanced timestamp detection - prioritize actual timestamp types
+			const isActualTimestampType = validTimestampTypes.has(baseType);
+			const hasTimestampName = timestampFieldNamePatterns.test(fieldName);
+			
+			if (isActualTimestampType || (hasTimestampName && baseType.includes('INT64'))) {
+				insights.field_patterns.timestamp_fields.add(field.column_name);
+				analysis.analytics_features.has_timestamp = true;
+				analysis.analytics_features.timestamp_nullable = isNullable;
+				// Higher score for actual timestamp types
+				if (isActualTimestampType) {
+					analysis.mixpanel_score += isNullable ? 3 : 5;
+				} else {
+					analysis.mixpanel_score += isNullable ? 1 : 2;
+				}
+			}
+
+			// Complex field analysis - only flag as nested if field path actually contains nested structure
+			const isNested = fieldPath && fieldPath.includes('.') && fieldPath !== field.column_name;
+			const isRepeated = fieldType.includes('REPEATED') || fieldType.startsWith('ARRAY');
+			const isStruct = baseType === 'STRUCT' || baseType === 'RECORD';
+
+			if (isNested) {
+				analysis.schema_complexity.nested_fields++;
+				analysis.schema_complexity.complex_types.push({
+					field: field.column_name,
+					type: 'NESTED',
+					full_type: fieldType,
+					path: fieldPath
+				});
+			}
+			if (isRepeated) {
+				analysis.schema_complexity.repeated_fields++;
+				analysis.schema_complexity.complex_types.push({
+					field: field.column_name,
+					type: 'REPEATED',
+					full_type: fieldType,
+					path: fieldPath
+				});
+				// Penalize Mixpanel score for repeated fields
+				analysis.mixpanel_score -= 1;
+				analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (REPEATED)');
+			}
+			if (isStruct) {
+				analysis.schema_complexity.struct_fields++;
+				analysis.schema_complexity.complex_types.push({
+					field: field.column_name,
+					type: 'STRUCT',
+					full_type: fieldType,
+					path: fieldPath
+				});
+				// Penalize Mixpanel score for struct fields
+				analysis.mixpanel_score -= 1;
+				analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (STRUCT)');
+			}
+
+			if (userIdPatterns.test(fieldName)) {
+				insights.field_patterns.user_id_fields.add(field.column_name);
+				analysis.analytics_features.has_user_id = true;
+				analysis.analytics_features.user_id_nullable = isNullable;
+				analysis.mixpanel_score += isNullable ? 1 : 3;
+			}
+
+			if (eventIdPatterns.test(fieldName)) {
+				insights.field_patterns.event_id_fields.add(field.column_name);
+				analysis.analytics_features.has_event_id = true;
+				analysis.analytics_features.event_id_nullable = isNullable;
+				analysis.mixpanel_score += isNullable ? 1 : 2;
+			}
+
+			if (sessionPatterns.test(fieldName)) {
+				insights.field_patterns.session_fields.add(field.column_name);
+				analysis.analytics_features.has_session_id = true;
+				analysis.mixpanel_score += 1;
+			}
+
+			if (eventNamePatterns.test(fieldName)) {
+				analysis.analytics_features.has_event_name = true;
+				analysis.mixpanel_score += 1;
+			}
+
+			// Data quality analysis
+			if (!isNullable) {
+				analysis.data_quality.unique_fields.push(field.column_name);
+			}
+
+			// PII detection
+			if (/email|phone|address|ssn|social|name|first|last/i.test(fieldName)) {
+				analysis.data_quality.potential_pii.push(field.column_name);
+			}
+
+			// Store field analysis
+			analysis.field_analysis[field.column_name] = {
+				type: fieldType,
+				nullable: isNullable,
+				is_join_key: field.is_potential_join_key || false
+			};
+		});
+
+		// Sample data analysis for data quality, PII detection, and freshness
+		if (table.sample_data && table.sample_data.length > 0) {
+			const sampleSize = table.sample_data.length;
+			
+			// PII detection patterns
+			const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+			const ssnPattern = /^\d{3}-?\d{2}-?\d{4}$/;
+			const creditCardPattern = /^\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}$/;
+			const phonePattern = /^[\+]?[1-9][\d]{0,15}$/;
+			
+			Object.keys(table.sample_data[0] || {}).forEach(fieldName => {
+				const values = table.sample_data.map(row => row[fieldName]).filter(v => v !== null && v !== undefined && v !== '');
+				
+				const nullCount = table.sample_data.filter(row => 
+					row[fieldName] === null || row[fieldName] === undefined || row[fieldName] === ''
+				).length;
+				const nullRate = (nullCount / sampleSize) * 100;
+				
+				if (analysis.field_analysis[fieldName]) {
+					analysis.field_analysis[fieldName].null_rate_sample = Math.round(nullRate);
+				}
+
+				// Enhanced PII detection on actual values
+				if (values.length > 0) {
+					const stringValues = values.filter(v => typeof v === 'string');
+					if (stringValues.length > 0) {
+						const emailCount = stringValues.filter(v => emailPattern.test(v)).length;
+						const ssnCount = stringValues.filter(v => ssnPattern.test(v)).length;
+						const creditCardCount = stringValues.filter(v => creditCardPattern.test(v)).length;
+						const phoneCount = stringValues.filter(v => phonePattern.test(v.replace(/[\s\-\(\)]/g, ''))).length;
+						
+						// If >30% of values match PII patterns, flag as PII
+						const threshold = Math.max(1, Math.floor(stringValues.length * 0.3));
+						
+						if (emailCount >= threshold) {
+							analysis.data_quality.potential_pii.push(fieldName + ' (emails)');
+						}
+						if (ssnCount >= threshold) {
+							analysis.data_quality.potential_pii.push(fieldName + ' (SSNs)');
+						}
+						if (creditCardCount >= threshold) {
+							analysis.data_quality.potential_pii.push(fieldName + ' (credit cards)');
+						}
+						if (phoneCount >= threshold) {
+							analysis.data_quality.potential_pii.push(fieldName + ' (phone numbers)');
+						}
+					}
+				}
+			});
+
+			// Data freshness analysis for timestamp fields - use enhanced detection
+			const timestampField = analysis.analytics_features.has_timestamp ? 
+				(table.schema || []).find(f => {
+					const fieldType = (f.nested_type || '').split('(')[0].toUpperCase();
+					const fieldName = f.column_name.toLowerCase();
+					return validTimestampTypes.has(fieldType) || timestampFieldNamePatterns.test(fieldName);
+				}) : null;
+			
+			if (timestampField) {
+				const timestamps = table.sample_data
+					.map(row => row[timestampField.column_name])
+					.filter(ts => ts && ts !== null && ts !== undefined)
+					.map(ts => {
+						try {
+							return new Date(ts).getTime();
+						} catch (e) {
+							return null;
+						}
+					})
+					.filter(ts => ts !== null && !isNaN(ts));
+
+				if (timestamps.length > 0) {
+					const now = Date.now();
+					const maxTimestamp = Math.max(...timestamps);
+					const minTimestamp = Math.min(...timestamps);
+					const daysSinceNewest = Math.floor((now - maxTimestamp) / (1000 * 60 * 60 * 24));
+					const daysSinceOldest = Math.floor((now - minTimestamp) / (1000 * 60 * 60 * 24));
+					
+					analysis.data_freshness = {
+						timestamp_field: timestampField.column_name,
+						newest_record_days_ago: daysSinceNewest,
+						oldest_record_days_ago: daysSinceOldest,
+						data_span_days: daysSinceOldest - daysSinceNewest,
+						freshness_score: daysSinceNewest <= 1 ? 'fresh' : daysSinceNewest <= 7 ? 'recent' : daysSinceNewest <= 30 ? 'stale' : 'old'
+					};
+				}
+			}
+		}
+
+		// Enhanced table categorization with event table patterns
+		analysis.table_category = 'unknown';
+		const tableName = table.table_name.toLowerCase();
+		const isEventTableByName = eventTablePatterns.test(table.table_name);
+		
+		// Event table detection - prioritize table name patterns
+		if (isEventTableByName || 
+			(analysis.analytics_features.has_timestamp && analysis.analytics_features.has_user_id) ||
+			(analysis.analytics_features.has_timestamp && 
+			 (analysis.analytics_features.has_event_name || analysis.analytics_features.has_event_id))) {
+			
+			analysis.table_category = 'event';
+			insights.event_tables.push(analysis);
+			
+			// Higher Mixpanel score for properly structured event tables
+			if (analysis.analytics_features.has_timestamp && analysis.analytics_features.has_user_id) {
+				analysis.mixpanel_score += 2;
+			}
+		}
+		// Profile table detection
+		else if (analysis.analytics_features.has_user_id && !analysis.analytics_features.has_timestamp) {
+			if (tableName.includes('user') ||
+				tableName.includes('profile') ||
+				tableName.includes('customer') ||
+				tableName.includes('member')) {
+				analysis.table_category = 'profile';
+				insights.user_tables.push(analysis);
+			}
+		}
+		// Tables with timestamp but no user_id might be system events or logs
+		else if (analysis.analytics_features.has_timestamp && !analysis.analytics_features.has_user_id) {
+			analysis.table_category = 'system_event';
+			insights.event_tables.push(analysis);
+		}
+		// Lookup tables (no timestamp, may have user_id or other join keys)
+		else {
+			const joinKeyCount = (table.schema || []).filter(f => f.is_potential_join_key).length;
+			if (joinKeyCount > 0) {
+				analysis.table_category = 'lookup';
+			}
+		}
+
+		// Penalize Mixpanel score for high schema complexity
+		const complexityPenalty = Math.min(3, analysis.schema_complexity.struct_fields + analysis.schema_complexity.repeated_fields);
+		analysis.mixpanel_score = Math.max(0, analysis.mixpanel_score - complexityPenalty);
+
+		// Mixpanel readiness (for event tables specifically)
+		if (analysis.table_category === 'event' && analysis.mixpanel_score >= 4) {
+			insights.mixpanel_ready.push(analysis);
+		}
+
+		insights.data_quality.push(analysis);
+	});
+
+	// Convert Sets to Arrays for JSON serialization
+	insights.field_patterns.timestamp_fields = Array.from(insights.field_patterns.timestamp_fields);
+	insights.field_patterns.user_id_fields = Array.from(insights.field_patterns.user_id_fields);
+	insights.field_patterns.event_id_fields = Array.from(insights.field_patterns.event_id_fields);
+	insights.field_patterns.session_fields = Array.from(insights.field_patterns.session_fields);
+
+	return insights;
+}
+
 const jsonEscape = str => {
 	if (typeof str !== "string") return "";
 	return str.replace(/\\/g, "\\\\").replace(/"/g, '"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
@@ -1084,6 +1401,11 @@ async function runAudit() {
 			} view dependencies, ${lineageGraph.edges.filter(e => e.type === "join_key").length} join key relationships).${colors.nc}`
 		);
 
+		// Analytics compatibility analysis
+		console.log(`\n${colors.yellow}Analyzing tables for analytics compatibility (Mixpanel, event tracking, etc.)...${colors.nc}`);
+		const analyticsInsights = analyzeAnalyticsCompatibility(allTables);
+		console.log(`${colors.green}✓ Analytics analysis complete: ${analyticsInsights.mixpanel_ready.length} Mixpanel-ready tables found.${colors.nc}`);
+
 		// Finalize JSON
 		const finalJson = {
 			audit_metadata: {
@@ -1094,6 +1416,7 @@ async function runAudit() {
 			},
 			tables: allTables,
 			lineage: lineageGraph,
+			analytics: analyticsInsights,
 			summary: { ...auditSummary, total_objects: tables.length }
 		};
 		await fs.writeFile(path.join(config.outputDir, "reports", "dataset_audit.json"), JSON.stringify(finalJson, null, 2));

@@ -151,6 +151,18 @@ function generateHtmlReport(data) {
         .error-message { background: var(--error-glow); border: 1px solid var(--error); color: var(--error); padding: 10px; border-radius: 8px; margin-top: 10px; font-family: monospace; }
         .join-key-row { background-color: rgba(120, 86, 255, 0.1); }
         .join-key-cell { color: var(--accent); font-weight: 600; }
+        .complex-field-row { background-color: rgba(255, 117, 87, 0.08); border-left: 3px solid var(--lava-100); }
+        .complex-field-cell { color: var(--lava-100); font-weight: 600; }
+        .nested-field-indicator { 
+            display: inline-block; 
+            margin-left: 5px; 
+            padding: 2px 6px; 
+            background: rgba(255, 117, 87, 0.15); 
+            color: var(--lava-100); 
+            font-size: 0.7rem; 
+            border-radius: 3px; 
+            font-weight: 600;
+        }
         .sample-json { background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.85rem; color: var(--text-secondary); max-height: 400px; overflow: auto; white-space: pre-wrap; }
         .sample-section { margin-top: 20px; }
         .sample-toggle { color: var(--mint-100); font-weight: 600; margin: 20px 0 10px; transition: color 0.2s ease; }
@@ -317,7 +329,7 @@ function generateHtmlReport(data) {
     <div class="container">
         <header>
             <h1>BigQuery Dataset Audit</h1>
-            <p class="subtitle">Project: <code id="headerProject"></code> &nbsp;&bull;&nbsp; Dataset: <code id="headerDataset"></code></p>
+            <p class="subtitle">Project: <code id="headerProject"></code> &nbsp;&bull;&nbsp; Dataset: <code id="headerDataset"></code> &nbsp;&bull;&nbsp; <span id="headerErrors" style="color: var(--lava-100);"></span></p>
         </header>
         <section class="summary-cards">
             <div class="card"><h3>Total Objects</h3><div class="number" id="summaryTotalObjects">0</div></div>
@@ -325,7 +337,51 @@ function generateHtmlReport(data) {
             <div class="card"><h3>Views</h3><div class="number" id="summaryViews">0</div></div>
             <div class="card"><h3>Total Rows</h3><div class="number" id="summaryTotalRows">0</div></div>
             <div class="card"><h3>Total Size</h3><div class="number" id="summaryTotalSize">0 B</div></div>
-            <div class="card error"><h3>Objects with Errors</h3><div class="number" id="summaryFailedObjects">0</div></div>
+        </section>
+        
+        <!-- Analytics Insights Section -->
+        <section class="analytics-insights-section">
+            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🎯 Analytics & Data Quality Insights</h2>
+            
+            <!-- Mixpanel Compatibility Cards -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                <div class="card" style="background: linear-gradient(135deg, rgba(120, 86, 255, 0.1), rgba(120, 86, 255, 0.05)); border-color: rgba(120, 86, 255, 0.3);">
+                    <h3 style="color: var(--accent);">🚀 Mixpanel Ready</h3>
+                    <div class="number" style="color: var(--accent);" id="mixpanelReadyCount">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp + user ID</div>
+                </div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(7, 176, 150, 0.1), rgba(7, 176, 150, 0.05)); border-color: rgba(7, 176, 150, 0.3);">
+                    <h3 style="color: var(--mint-150);">📅 Event Tables</h3>
+                    <div class="number" style="color: var(--mint-150);" id="eventTablesCount">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp fields</div>
+                </div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(248, 188, 59, 0.1), rgba(248, 188, 59, 0.05)); border-color: rgba(248, 188, 59, 0.3);">
+                    <h3 style="color: var(--mustard-100);">👤 User Tables</h3>
+                    <div class="number" style="color: var(--mustard-100);" id="userTablesCount">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with user identifiers</div>
+                </div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(255, 117, 87, 0.1), rgba(255, 117, 87, 0.05)); border-color: rgba(255, 117, 87, 0.3);">
+                    <h3 style="color: var(--lava-100);">⚠️ PII Detected</h3>
+                    <div class="number" style="color: var(--lava-100);" id="piiTablesCount">0</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with potential PII</div>
+                </div>
+            </div>
+            
+            <!-- Field Pattern Analysis -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">🏷️ Common Field Patterns</h3>
+                    <div id="fieldPatternsAnalysis" style="display: grid; gap: 10px;"></div>
+                </div>
+                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">📊 Data Quality Overview</h3>
+                    <div id="dataQualityOverview" style="display: grid; gap: 8px;"></div>
+                </div>
+                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--lava-100); font-size: 1.1rem; margin-bottom: 15px;">🏗️ Schema Complexity</h3>
+                    <div id="schemaComplexityOverview" style="display: grid; gap: 8px;"></div>
+                </div>
+            </div>
         </section>
         
         <section class="analytics-section">
@@ -346,6 +402,14 @@ function generateHtmlReport(data) {
                 <div class="chart-container">
                     <div class="chart-title">Partitioned vs Non-Partitioned</div>
                     <svg id="partitionChart" class="d3-chart"></svg>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Data Freshness Distribution</div>
+                    <svg id="freshnessChart" class="d3-chart"></svg>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Analytics Readiness Score</div>
+                    <svg id="analyticsScoreChart" class="d3-chart"></svg>
                 </div>
             </div>
         </section>
@@ -406,10 +470,32 @@ function generateHtmlReport(data) {
         </section>
         
         <main>
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Search by table name or field name...">
-                <button class="expand-collapse-btn" id="expandCollapseBtn">Expand All</button>
+            <div style="margin-bottom: 25px;">
+                <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 15px; font-size: 1.8rem;">🔍 Table Explorer</h2>
+                
+                <!-- Enhanced Search and Filters -->
+                <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 15px; margin-bottom: 15px;">
+                    <input type="text" id="searchInput" placeholder="Search by table name, field name, or data type..." style="padding: 16px; font-size: 1rem; background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);">
+                    <select id="analyticsFilter" style="padding: 16px; font-size: 1rem; background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);">
+                        <option value="">Show All Tables</option>
+                        <option value="mixpanel_ready">🚀 Mixpanel Ready</option>
+                        <option value="event_tables">📅 Event Tables</option>
+                        <option value="user_tables">👤 User Tables</option>
+                        <option value="has_pii">⚠️ Contains PII</option>
+                        <option value="high_quality">✅ High Quality</option>
+                        <option value="partitioned">🗂️ Partitioned</option>
+                        <option value="fresh_data">🟢 Fresh Data (≤7 days)</option>
+                        <option value="stale_data">🟠 Stale Data (>30 days)</option>
+                        <option value="complex_schema">🏗️ Complex Schema</option>
+                        <option value="simple_schema">✅ Simple Schema</option>
+                    </select>
+                    <button class="expand-collapse-btn" id="expandCollapseBtn">Expand All</button>
+                </div>
+                
+                <!-- Quick Stats for Filtered Results -->
+                <div id="filterStats" style="display: none; background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 15px; font-size: 0.9rem; color: var(--text-secondary);"></div>
             </div>
+            
             <div id="tablesContainer"></div>
         </main>
     </div>
@@ -446,10 +532,16 @@ function generateHtmlReport(data) {
             function renderSummary() {
                 document.getElementById('headerProject').textContent = data.audit_metadata.project_id;
                 document.getElementById('headerDataset').textContent = data.audit_metadata.dataset_id;
+                
+                // Add errors to header
+                const errorText = data.summary.failed_objects > 0 ? 
+                    \`Objects with Errors: \${data.summary.failed_objects}\` : 
+                    'No Errors';
+                document.getElementById('headerErrors').textContent = errorText;
+                
                 document.getElementById('summaryTotalObjects').textContent = data.summary.total_objects.toLocaleString();
                 document.getElementById('summaryTables').textContent = data.summary.total_tables.toLocaleString();
                 document.getElementById('summaryViews').textContent = data.summary.total_views.toLocaleString();
-                document.getElementById('summaryFailedObjects').textContent = data.summary.failed_objects.toLocaleString();
                 
                 // Calculate total rows and size
                 let totalRows = 0;
@@ -466,6 +558,159 @@ function generateHtmlReport(data) {
                 
                 document.getElementById('summaryTotalRows').textContent = totalRows.toLocaleString();
                 document.getElementById('summaryTotalSize').textContent = bytesHuman(totalBytes);
+            }
+
+            function renderAnalyticsInsights() {
+                console.log('Analytics data:', data.analytics); // Debug
+                
+                if (!data.analytics) {
+                    console.log('No analytics data found');
+                    // Hide analytics section if no data
+                    const analyticsSection = document.querySelector('.analytics-insights-section');
+                    if (analyticsSection) {
+                        analyticsSection.style.display = 'none';
+                    }
+                    return;
+                }
+                
+                // Update analytics cards
+                document.getElementById('mixpanelReadyCount').textContent = data.analytics.mixpanel_ready?.length || 0;
+                document.getElementById('eventTablesCount').textContent = data.analytics.event_tables?.length || 0;
+                document.getElementById('userTablesCount').textContent = data.analytics.user_tables?.length || 0;
+                
+                // Count tables with PII
+                const piiTables = data.analytics.data_quality?.filter(t => t.data_quality?.potential_pii?.length > 0) || [];
+                document.getElementById('piiTablesCount').textContent = piiTables.length;
+                
+                // Render field patterns
+                renderFieldPatterns();
+                renderDataQualityOverview();
+                renderSchemaComplexityOverview();
+            }
+            
+            function renderFieldPatterns() {
+                const container = document.getElementById('fieldPatternsAnalysis');
+                
+                if (!data.analytics || !data.analytics.field_patterns) {
+                    container.innerHTML = '<div style="color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Analytics data not available - run a new audit to see field patterns</div>';
+                    return;
+                }
+                
+                const patterns = data.analytics.field_patterns;
+                let html = '';
+                
+                if (patterns.timestamp_fields && patterns.timestamp_fields.length > 0) {
+                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mint-150);">
+                        <div style="font-weight: 600; color: var(--mint-150); font-size: 0.9rem; margin-bottom: 3px;">⏰ Timestamp Fields (\${patterns.timestamp_fields.length})</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.timestamp_fields.slice(0, 3).join(', ')}\${patterns.timestamp_fields.length > 3 ? ', ...' : ''}</div>
+                    </div>\`;
+                }
+                
+                if (patterns.user_id_fields && patterns.user_id_fields.length > 0) {
+                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--accent);">
+                        <div style="font-weight: 600; color: var(--accent); font-size: 0.9rem; margin-bottom: 3px;">👤 User ID Fields (\${patterns.user_id_fields.length})</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.user_id_fields.slice(0, 3).join(', ')}\${patterns.user_id_fields.length > 3 ? ', ...' : ''}</div>
+                    </div>\`;
+                }
+                
+                if (patterns.event_id_fields && patterns.event_id_fields.length > 0) {
+                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mustard-100);">
+                        <div style="font-weight: 600; color: var(--mustard-100); font-size: 0.9rem; margin-bottom: 3px;">🔑 Event ID Fields (\${patterns.event_id_fields.length})</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.event_id_fields.slice(0, 3).join(', ')}\${patterns.event_id_fields.length > 3 ? ', ...' : ''}</div>
+                    </div>\`;
+                }
+                
+                if (patterns.session_fields && patterns.session_fields.length > 0) {
+                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--lava-100);">
+                        <div style="font-weight: 600; color: var(--lava-100); font-size: 0.9rem; margin-bottom: 3px;">🔗 Session Fields (\${patterns.session_fields.length})</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.session_fields.slice(0, 3).join(', ')}\${patterns.session_fields.length > 3 ? ', ...' : ''}</div>
+                    </div>\`;
+                }
+                
+                container.innerHTML = html || '<div style="color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">No common patterns detected</div>';
+            }
+            
+            function renderDataQualityOverview() {
+                const container = document.getElementById('dataQualityOverview');
+                
+                if (!data.analytics || !data.analytics.data_quality) {
+                    container.innerHTML = '<div style="color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Analytics data not available - run a new audit to see data quality metrics</div>';
+                    return;
+                }
+                
+                const qualities = data.analytics.data_quality;
+                
+                // Calculate quality metrics
+                const highQualityTables = qualities.filter(t => t.mixpanel_score >= 4).length;
+                const tablesWithNonNullable = qualities.filter(t => t.data_quality?.unique_fields?.length > 0).length;
+                const avgMixpanelScore = qualities.length > 0 ? qualities.reduce((sum, t) => sum + (t.mixpanel_score || 0), 0) / qualities.length : 0;
+                
+                let html = \`
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--mint-150);">\${highQualityTables}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">High Quality</div>
+                        </div>
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent);">\${tablesWithNonNullable}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">Non-nullable Fields</div>
+                        </div>
+                    </div>
+                    <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center; margin-top: 8px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: var(--mustard-100);">\${avgMixpanelScore.toFixed(1)}/10</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">Avg Analytics Score</div>
+                    </div>
+                \`;
+                
+                container.innerHTML = html;
+            }
+            
+            function renderSchemaComplexityOverview() {
+                const container = document.getElementById('schemaComplexityOverview');
+                
+                if (!data.analytics || !data.analytics.data_quality) {
+                    container.innerHTML = '<div style="color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Analytics data not available</div>';
+                    return;
+                }
+                
+                const qualities = data.analytics.data_quality;
+                
+                // Calculate complexity metrics
+                const tablesWithStruct = qualities.filter(t => t.schema_complexity?.struct_fields > 0).length;
+                const tablesWithRepeated = qualities.filter(t => t.schema_complexity?.repeated_fields > 0).length;
+                const tablesWithNested = qualities.filter(t => t.schema_complexity?.nested_fields > 0).length;
+                const totalComplexFields = qualities.reduce((sum, t) => 
+                    sum + (t.schema_complexity?.struct_fields || 0) + (t.schema_complexity?.repeated_fields || 0), 0);
+                
+                let html = \`
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--lava-100);">\${tablesWithStruct}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">Tables with STRUCTs</div>
+                        </div>
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--lava-100);">\${tablesWithRepeated}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">Tables with REPEATED</div>
+                        </div>
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--mustard-100);">\${tablesWithNested}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">Nested Fields</div>
+                        </div>
+                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent);">\${totalComplexFields}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">Total Complex</div>
+                        </div>
+                    </div>
+                \`;
+                
+                if (totalComplexFields > 0) {
+                    html += \`<div style="margin-top: 10px; padding: 8px; background: rgba(255, 117, 87, 0.1); border-radius: 6px; border-left: 3px solid var(--lava-100);">
+                        <div style="font-size: 0.8rem; color: var(--lava-100); font-weight: 600;">⚠️ Mixpanel Incompatible Fields Detected</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Consider flattening STRUCT/REPEATED fields for analytics</div>
+                    </div>\`;
+                }
+                
+                container.innerHTML = html;
             }
 
             function formatValue(value) {
@@ -487,19 +732,49 @@ function generateHtmlReport(data) {
                 });
                 rows.forEach(rowData => {
                     const row = tbody.insertRow();
-                    // Check if this row represents a join key for schema tables
+                    
+                    // Check for complex fields (STRUCT, REPEATED, nested)
+                    const fieldType = rowData.nested_type || '';
+                    const fieldPath = rowData.nested_field_path || rowData.column_name || '';
+                    const isComplex = fieldType.includes('STRUCT') || fieldType.includes('REPEATED') || 
+                                    fieldType.startsWith('ARRAY') || fieldPath.includes('.');
                     const isJoinKey = highlightJoinKeys && rowData.is_potential_join_key === true;
-                    if (isJoinKey) {
+                    
+                    if (isComplex) {
+                        row.classList.add('complex-field-row');
+                    } else if (isJoinKey) {
                         row.classList.add('join-key-row');
                     }
                     
                     headers.forEach(header => {
                         const cell = row.insertCell();
                         let value = rowData[header];
+                        
                         if (typeof value === 'object' && value !== null) {
                             cell.textContent = JSON.stringify(value);
                         } else {
                             cell.textContent = formatValue(value);
+                        }
+                        
+                        // Add indicators for complex fields
+                        if (header === 'nested_type' && isComplex) {
+                            cell.classList.add('complex-field-cell');
+                            
+                            // Add visual indicators
+                            let indicators = '';
+                            if (fieldType.includes('STRUCT') || fieldType.includes('RECORD')) {
+                                indicators += '<span class="nested-field-indicator">STRUCT</span>';
+                            }
+                            if (fieldType.includes('REPEATED') || fieldType.startsWith('ARRAY')) {
+                                indicators += '<span class="nested-field-indicator">REPEATED</span>';
+                            }
+                            if (fieldPath.includes('.')) {
+                                indicators += '<span class="nested-field-indicator">NESTED</span>';
+                            }
+                            
+                            if (indicators) {
+                                cell.innerHTML = formatValue(value) + indicators;
+                            }
                         }
                         
                         // Highlight join key cells
@@ -520,6 +795,37 @@ function generateHtmlReport(data) {
                 for (const table of data.tables) {
                     const typeClass = table.table_type.toLowerCase();
                     const errorBadge = table.has_permission_error ? \`<div class="badge error">Error</div>\` : '';
+                    
+                    // Get analytics insights for this table
+                    const analytics = data.analytics ? data.analytics.data_quality.find(a => a.table_name === table.table_name) : null;
+                    const mixpanelBadge = analytics && analytics.mixpanel_score >= 4 ? \`<div class="badge" style="background: rgba(120, 86, 255, 0.15); color: var(--accent);">🚀 Mixpanel Ready</div>\` : '';
+                    const piiWarning = analytics && analytics.data_quality.potential_pii.length > 0 ? \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--lava-100);">⚠️ PII</div>\` : '';
+                    const qualityScore = analytics ? \`<div class="badge" style="background: rgba(7, 176, 150, 0.15); color: var(--mint-150);">Score: \${analytics.mixpanel_score}/10</div>\` : '';
+                    
+                    // Schema complexity badges
+                    let complexityBadge = '';
+                    if (analytics && analytics.schema_complexity) {
+                        const complexity = analytics.schema_complexity;
+                        const hasComplexFields = complexity.struct_fields > 0 || complexity.repeated_fields > 0 || complexity.nested_fields > 0;
+                        if (hasComplexFields) {
+                            const complexityCount = complexity.struct_fields + complexity.repeated_fields;
+                            complexityBadge = \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--lava-100);" title="STRUCT: \${complexity.struct_fields}, REPEATED: \${complexity.repeated_fields}, NESTED: \${complexity.nested_fields}">🏗️ Complex (\${complexityCount})</div>\`;
+                        }
+                    }
+                    
+                    // Data freshness badge
+                    let freshnessBadge = '';
+                    if (analytics && analytics.data_freshness) {
+                        const freshness = analytics.data_freshness;
+                        const colors = {
+                            fresh: { bg: 'rgba(7, 176, 150, 0.15)', color: 'var(--mint-150)', icon: '🟢' },
+                            recent: { bg: 'rgba(248, 188, 59, 0.15)', color: 'var(--mustard-100)', icon: '🟡' },
+                            stale: { bg: 'rgba(255, 117, 87, 0.15)', color: 'var(--lava-100)', icon: '🟠' },
+                            old: { bg: 'rgba(120, 86, 255, 0.15)', color: 'var(--accent)', icon: '🔴' }
+                        };
+                        const style = colors[freshness.freshness_score] || colors.old;
+                        freshnessBadge = \`<div class="badge" style="background: \${style.bg}; color: \${style.color};" title="Last updated \${freshness.newest_record_days_ago} days ago">\${style.icon} \${freshness.newest_record_days_ago}d ago</div>\`;
+                    }
                     let schemaHtml = '';
                     if (table.schema && table.schema.length > 0) {
                         const schemaHeaders = Object.keys(table.schema[0]);
@@ -558,7 +864,7 @@ function generateHtmlReport(data) {
                     }
                     const viewDefHtml = table.table_type === 'VIEW' && table.view_definition ? \`<h4>View Definition</h4><pre>\${table.view_definition.replace(/\\\\n/g, '\\n')}</pre>\` : '';
                     html += \`
-                        <div class="table-item" data-name="\${table.table_name.toLowerCase()}">
+                        <div class="table-item" data-name="\${table.table_name.toLowerCase()}" data-analytics='\${JSON.stringify(analytics || {})}'>
                             <div class="table-header">
                                 <span class="table-name">
                                     <svg class="expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -566,6 +872,11 @@ function generateHtmlReport(data) {
                                 </span>
                                 <div class="badges">
                                     <div class="badge \${typeClass}">\${table.table_type}</div>
+                                    \${mixpanelBadge}
+                                    \${piiWarning}
+                                    \${qualityScore}
+                                    \${complexityBadge}
+                                    \${freshnessBadge}
                                     \${errorBadge}
                                 </div>
                             </div>
@@ -599,6 +910,8 @@ function generateHtmlReport(data) {
 
             function addEventListeners() {
                 const expandCollapseBtn = document.getElementById('expandCollapseBtn');
+                const analyticsFilter = document.getElementById('analyticsFilter');
+                const searchInput = document.getElementById('searchInput');
                 let allExpanded = false;
                 
                 // Expand/Collapse all functionality
@@ -639,23 +952,80 @@ function generateHtmlReport(data) {
                     }
                 });
                 
+                // Analytics filter functionality
+                analyticsFilter.addEventListener('change', e => {
+                    applyFilters();
+                });
+                
                 // Enhanced search functionality with deep schema filtering
                 searchInput.addEventListener('input', e => {
-                    const searchTerm = e.target.value.toLowerCase().trim();
-                    let hasVisibleItems = false;
+                    applyFilters();
+                });
+                
+                function applyFilters() {
+                    const searchTerm = searchInput.value.toLowerCase().trim();
+                    const filterType = analyticsFilter.value;
+                    let visibleCount = 0;
+                    let totalRows = 0;
+                    let totalSize = 0;
                     
                     document.querySelectorAll('.table-item').forEach(item => {
                         const tableName = item.dataset.name;
+                        const analyticsData = JSON.parse(item.dataset.analytics || '{}');
                         let shouldShow = false;
                         let hasMatchingRows = false;
                         
+                        // Apply analytics filter first
+                        let passesAnalyticsFilter = true;
+                        if (filterType) {
+                            switch (filterType) {
+                                case 'mixpanel_ready':
+                                    passesAnalyticsFilter = analyticsData.mixpanel_score >= 4;
+                                    break;
+                                case 'event_tables':
+                                    passesAnalyticsFilter = analyticsData.analytics_features?.has_timestamp;
+                                    break;
+                                case 'user_tables':
+                                    passesAnalyticsFilter = analyticsData.analytics_features?.has_user_id;
+                                    break;
+                                case 'has_pii':
+                                    passesAnalyticsFilter = analyticsData.data_quality?.potential_pii?.length > 0;
+                                    break;
+                                case 'high_quality':
+                                    passesAnalyticsFilter = analyticsData.mixpanel_score >= 6;
+                                    break;
+                                case 'partitioned':
+                                    const table = data.tables.find(t => t.table_name.toLowerCase() === tableName);
+                                    passesAnalyticsFilter = table && table.partition_info && table.partition_info.length > 0;
+                                    break;
+                                case 'fresh_data':
+                                    passesAnalyticsFilter = analyticsData.data_freshness && analyticsData.data_freshness.newest_record_days_ago <= 7;
+                                    break;
+                                case 'stale_data':
+                                    passesAnalyticsFilter = analyticsData.data_freshness && analyticsData.data_freshness.newest_record_days_ago > 30;
+                                    break;
+                                case 'complex_schema':
+                                    passesAnalyticsFilter = analyticsData.schema_complexity && (analyticsData.schema_complexity.nested_fields > 0 || analyticsData.schema_complexity.repeated_fields > 0 || analyticsData.schema_complexity.struct_fields > 0);
+                                    break;
+                                case 'simple_schema':
+                                    passesAnalyticsFilter = !analyticsData.schema_complexity || (analyticsData.schema_complexity.nested_fields === 0 && analyticsData.schema_complexity.repeated_fields === 0 && analyticsData.schema_complexity.struct_fields === 0);
+                                    break;
+                            }
+                        }
+                        
+                        if (!passesAnalyticsFilter) {
+                            item.style.display = 'none';
+                            return;
+                        }
+                        
+                        // Apply search filter
                         if (!searchTerm) {
-                            // No search term - show all tables and reset row visibility
+                            // No search term - show if passes analytics filter
                             shouldShow = true;
                             item.querySelectorAll('tr').forEach(row => {
                                 row.style.display = '';
                             });
-                            item.classList.remove('expanded'); // Collapse when clearing search
+                            item.classList.remove('expanded');
                         } else {
                             // Search in table name
                             if (tableName.includes(searchTerm)) {
@@ -689,15 +1059,38 @@ function generateHtmlReport(data) {
                         }
                         
                         item.style.display = shouldShow ? '' : 'none';
-                        if (shouldShow) hasVisibleItems = true;
+                        
+                        if (shouldShow) {
+                            visibleCount++;
+                            // Calculate stats for visible tables
+                            const table = data.tables.find(t => t.table_name.toLowerCase() === tableName);
+                            if (table) {
+                                totalRows += table.row_count || 0;
+                                totalSize += table.size_mb || 0;
+                            }
+                        }
                     });
+                    
+                    // Update filter stats
+                    const filterStats = document.getElementById('filterStats');
+                    if (searchTerm || filterType) {
+                        filterStats.style.display = 'block';
+                        filterStats.innerHTML = \`
+                            Showing \${visibleCount} tables • 
+                            Total rows: \${totalRows.toLocaleString()} • 
+                            Total size: \${bytesHuman(totalSize * 1024 * 1024)}
+                            \${filterType ? \` • Filter: \${analyticsFilter.options[analyticsFilter.selectedIndex].text}\` : ''}
+                        \`;
+                    } else {
+                        filterStats.style.display = 'none';
+                    }
                     
                     // Update expand/collapse button state based on visible items
                     const visibleExpandedItems = document.querySelectorAll('.table-item:not([style*="display: none"]).expanded');
                     const visibleItems = document.querySelectorAll('.table-item:not([style*="display: none"])');
                     allExpanded = visibleExpandedItems.length === visibleItems.length && visibleItems.length > 0;
                     expandCollapseBtn.textContent = allExpanded ? 'Collapse All' : 'Expand All';
-                });
+                }
             }
 
             function renderCharts() {
@@ -774,6 +1167,61 @@ function generateHtmlReport(data) {
                         'Non-Partitioned': 'rgba(255, 117, 87, 0.8)'
                     }
                 });
+
+                // Data Freshness Distribution
+                if (data.analytics && data.analytics.data_quality) {
+                    const freshnessCounts = data.analytics.data_quality.reduce((acc, table) => {
+                        if (table.data_freshness) {
+                            const score = table.data_freshness.freshness_score;
+                            acc[score] = (acc[score] || 0) + 1;
+                        } else {
+                            acc['no_timestamp'] = (acc['no_timestamp'] || 0) + 1;
+                        }
+                        return acc;
+                    }, {});
+                    
+                    const freshnessData = Object.entries(freshnessCounts).map(function(entry) { 
+                        return { 
+                            label: entry[0].replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()), 
+                            value: entry[1] 
+                        }; 
+                    });
+                    
+                    renderD3PieChart('freshnessChart', freshnessData, {
+                        colors: {
+                            'Fresh': 'rgba(7, 176, 150, 0.8)',
+                            'Recent': 'rgba(248, 188, 59, 0.8)',
+                            'Stale': 'rgba(255, 117, 87, 0.8)',
+                            'Old': 'rgba(120, 86, 255, 0.8)',
+                            'No Timestamp': 'rgba(163, 179, 204, 0.8)'
+                        }
+                    });
+
+                    // Analytics Readiness Score Distribution
+                    const scoreRanges = { '0-2': 0, '3-4': 0, '5-6': 0, '7-8': 0, '9-10': 0 };
+                    data.analytics.data_quality.forEach(function(table) {
+                        const score = table.mixpanel_score;
+                        if (score <= 2) scoreRanges['0-2']++;
+                        else if (score <= 4) scoreRanges['3-4']++;
+                        else if (score <= 6) scoreRanges['5-6']++;
+                        else if (score <= 8) scoreRanges['7-8']++;
+                        else scoreRanges['9-10']++;
+                    });
+                    
+                    const scoreData = Object.entries(scoreRanges).map(function(entry) { 
+                        return { label: entry[0], value: entry[1] }; 
+                    });
+                    
+                    renderD3PieChart('analyticsScoreChart', scoreData, {
+                        colors: {
+                            '0-2': 'rgba(255, 117, 87, 0.8)',
+                            '3-4': 'rgba(248, 188, 59, 0.8)',
+                            '5-6': 'rgba(7, 176, 150, 0.8)',
+                            '7-8': 'rgba(120, 86, 255, 0.8)',
+                            '9-10': 'rgba(7, 176, 150, 1.0)'
+                        }
+                    });
+                }
             }
 
             // D3 Bar Chart Renderer
@@ -1491,6 +1939,7 @@ function generateHtmlReport(data) {
             }
 
             renderSummary();
+            renderAnalyticsInsights();
             renderTables();
             renderCharts();
             renderLineage();
