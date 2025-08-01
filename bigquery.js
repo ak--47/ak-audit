@@ -10,7 +10,7 @@ let { NODE_ENV = "production" } = process.env;
 // --- Configuration ---
 const config = {
 	projectId: process.argv[2] || "mixpanel-gtm-training",
-	datasetId: process.argv[3] || "warehouse_connectors", 
+	datasetId: process.argv[3] || "warehouse_connectors",
 	tableFilter: process.argv[4] ? process.argv[4].split(",").map(t => t.trim()) : null, // Comma-separated list of specific tables to audit (supports glob patterns)
 	location: process.argv[5] || "US",
 	sampleLimit: parseInt(process.argv[6]) || 10,
@@ -88,7 +88,7 @@ const matchesGlob = (str, pattern) => {
 		.replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except * and ?
 		.replace(/\*/g, '.*') // Convert * to .*
 		.replace(/\?/g, '.'); // Convert ? to .
-	
+
 	const regex = new RegExp(`^${regexPattern}$`, 'i'); // Case insensitive
 	return regex.test(str);
 };
@@ -110,14 +110,18 @@ function analyzeAnalyticsCompatibility(tables) {
 
 	// Enhanced field pattern detection - prioritize actual data types over field names
 	const validTimestampTypes = new Set(['TIMESTAMP', 'DATETIME', 'DATE', 'TIME']);
-	const timestampFieldNamePatterns = /^(.*timestamp.*|.*time.*|time|event_time|created_at|updated_at|occurred_at|processed_at|date_.*|.*_date|.*_dt)$/i;
-	const userIdPatterns = /^(user_id|userid|user\.id|client_id|clientid|client\.id|distinct_id|distinctid|anonymous_id|anon_id|customer_id|customerid|device_id|deviceid|device\.id|profile_id|profileid|account_id|accountid|member_id|memberid|person_id|personid|identity_id|identityid)$/i;
-	const eventIdPatterns = /^(event_id|eventid|insert_id|insertid|message_id|messageid|uuid|id|row_id|rowid|unique_id|uniqueid|record_id|recordid)$/i;
-	const sessionPatterns = /^(session_id|sessionid|visit_id|visitid|session_uuid|session\.id|visit\.id)$/i;
-	const eventNamePatterns = /^(event|event_name|eventname|event\.name|action|action_name|activity|activity_name)$/i;
-	
-	// Event table patterns - any table with "event" prefix is likely an event table
-	const eventTablePatterns = /^event[_\.]|.*[_\.]event[_\.]|.*events$/i;
+	// Looks for whole words `timestamp`, `time`, `date`, `ts`, or suffixes `_at`, `_dt`. More precise than `.*time.*`.
+	const timestampFieldNamePatterns = /(^|_)timestamp($|_)|(^|_)time($|_)|(^|_)date($|_)|(^|_)ts($|_)|_at$|_dt$/i;
+	// Modular pattern for user synonyms, handling separators `_`, `.`, or none, and `id` or `guid`.
+	const userIdPatterns = /^(?:user|client|customer|device|profile|account|member|person|identity|distinct|anonymous|anon|actor)(?:_|\.)?(?:id|guid)$/i;
+	// Combines specific patterns (`event_id`) with safer generic patterns (`\bid\b`) using word boundaries.
+	const eventIdPatterns = /^(?:event|insert|message|unique|record|row)_?id|\buuid\b|\bid\b$/i;
+	// Concise pattern for session/visit IDs with different separators and identifier types.
+	const sessionPatterns = /^(?:session|visit)(?:_|\.)?(?:id|uuid)$/i;
+	// Flexible pattern for event names, actions, or activities, allowing suffixes like `_name` or `_type`.
+	const eventNamePatterns = /^(?:event|action|activity)(?:_?(?:name|type)|\.(?:name|type))?$/i;
+	// Simple, robust pattern using a word boundary to find `event` or `events` anywhere in a table name.
+	const eventTablePatterns = /\bevents?\b/i;
 
 	tables.forEach(table => {
 		const analysis = {
@@ -163,7 +167,7 @@ function analyzeAnalyticsCompatibility(tables) {
 			// Enhanced timestamp detection - prioritize actual timestamp types
 			const isActualTimestampType = validTimestampTypes.has(baseType);
 			const hasTimestampName = timestampFieldNamePatterns.test(fieldName);
-			
+
 			if (isActualTimestampType || (hasTimestampName && baseType.includes('INT64'))) {
 				insights.field_patterns.timestamp_fields.add(field.column_name);
 				analysis.analytics_features.has_timestamp = true;
@@ -176,32 +180,64 @@ function analyzeAnalyticsCompatibility(tables) {
 				}
 			}
 
-			// Complex field analysis - only flag as nested if field path actually contains nested structure
+			// Enhanced complexity analysis based on Mixpanel best practices
 			const isNested = fieldPath && fieldPath.includes('.') && fieldPath !== field.column_name;
 			const isRepeated = fieldType.includes('REPEATED') || fieldType.startsWith('ARRAY');
 			const isStruct = baseType === 'STRUCT' || baseType === 'RECORD';
+			const isJson = baseType === 'JSON';
+			const isArrayOfStruct = fieldType.includes('ARRAY<STRUCT') || fieldType.includes('REPEATED STRUCT');
+			const nestingDepth = fieldPath ? (fieldPath.match(/\./g) || []).length : 0;
 
+			// Nested field analysis - deeply nested structures are problematic
 			if (isNested) {
 				analysis.schema_complexity.nested_fields++;
+				const complexityType = nestingDepth > 2 ? 'DEEPLY_NESTED' : 'NESTED';
 				analysis.schema_complexity.complex_types.push({
 					field: field.column_name,
-					type: 'NESTED',
+					type: complexityType,
 					full_type: fieldType,
-					path: fieldPath
+					path: fieldPath,
+					nesting_depth: nestingDepth
 				});
+
+				// Heavy penalty for deeply nested structures (3+ levels)
+				if (nestingDepth > 2) {
+					analysis.mixpanel_score -= 3;
+					analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (DEEPLY NESTED)');
+				} else if (nestingDepth > 1) {
+					analysis.mixpanel_score -= 1;
+					analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (NESTED)');
+				}
 			}
+
+			// Array/Repeated field analysis - distinguish acceptable vs problematic
 			if (isRepeated) {
 				analysis.schema_complexity.repeated_fields++;
-				analysis.schema_complexity.complex_types.push({
-					field: field.column_name,
-					type: 'REPEATED',
-					full_type: fieldType,
-					path: fieldPath
-				});
-				// Penalize Mixpanel score for repeated fields
-				analysis.mixpanel_score -= 1;
-				analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (REPEATED)');
+
+				if (isArrayOfStruct && nestingDepth <= 1) {
+					// ARRAY<STRUCT> for shopping carts etc. - acceptable with minimal penalty
+					analysis.schema_complexity.complex_types.push({
+						field: field.column_name,
+						type: 'ARRAY_OF_STRUCT',
+						full_type: fieldType,
+						path: fieldPath,
+						mixpanel_acceptable: true
+					});
+					analysis.mixpanel_score -= 0.5; // Light penalty
+				} else {
+					// Other repeated structures - moderate penalty
+					analysis.schema_complexity.complex_types.push({
+						field: field.column_name,
+						type: 'REPEATED',
+						full_type: fieldType,
+						path: fieldPath
+					});
+					analysis.mixpanel_score -= 1;
+					analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (REPEATED)');
+				}
 			}
+
+			// STRUCT field analysis - penalize based on complexity
 			if (isStruct) {
 				analysis.schema_complexity.struct_fields++;
 				analysis.schema_complexity.complex_types.push({
@@ -210,9 +246,20 @@ function analyzeAnalyticsCompatibility(tables) {
 					full_type: fieldType,
 					path: fieldPath
 				});
-				// Penalize Mixpanel score for struct fields
 				analysis.mixpanel_score -= 1;
 				analysis.schema_complexity.mixpanel_incompatible_fields.push(field.column_name + ' (STRUCT)');
+			}
+
+			// JSON field analysis - single JSON objects are acceptable
+			if (isJson && !isNested) {
+				analysis.schema_complexity.complex_types.push({
+					field: field.column_name,
+					type: 'JSON',
+					full_type: fieldType,
+					path: fieldPath,
+					mixpanel_acceptable: true
+				});
+				// No penalty for simple JSON fields - they're acceptable for Mixpanel
 			}
 
 			if (userIdPatterns.test(fieldName)) {
@@ -233,6 +280,27 @@ function analyzeAnalyticsCompatibility(tables) {
 				insights.field_patterns.session_fields.add(field.column_name);
 				analysis.analytics_features.has_session_id = true;
 				analysis.mixpanel_score += 1;
+			}
+
+			// Specific Mixpanel field requirements (based on Mixpanel best practices article)
+			if (fieldName === 'event' && baseType === 'STRING') {
+				analysis.analytics_features.has_event_field = true;
+				analysis.mixpanel_score += 3; // Critical field for event tables
+			}
+
+			if (fieldName === 'distinct_id' && (baseType === 'STRING' || baseType === 'INT64')) {
+				analysis.analytics_features.has_distinct_id = true;
+				analysis.mixpanel_score += 3; // Critical user identifier
+			}
+
+			if (fieldName === 'device_id' && (baseType === 'STRING' || baseType === 'INT64')) {
+				analysis.analytics_features.has_device_id = true;
+				analysis.mixpanel_score += 2; // Important for anonymous tracking
+			}
+
+			if (fieldName === 'insert_id' && (baseType === 'STRING' || baseType === 'INT64')) {
+				analysis.analytics_features.has_insert_id = true;
+				analysis.mixpanel_score += 2; // Important for de-duplication
 			}
 
 			if (eventNamePatterns.test(fieldName)) {
@@ -261,21 +329,21 @@ function analyzeAnalyticsCompatibility(tables) {
 		// Sample data analysis for data quality, PII detection, and freshness
 		if (table.sample_data && table.sample_data.length > 0) {
 			const sampleSize = table.sample_data.length;
-			
+
 			// PII detection patterns
 			const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			const ssnPattern = /^\d{3}-?\d{2}-?\d{4}$/;
 			const creditCardPattern = /^\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}$/;
 			const phonePattern = /^[\+]?[1-9][\d]{0,15}$/;
-			
+
 			Object.keys(table.sample_data[0] || {}).forEach(fieldName => {
 				const values = table.sample_data.map(row => row[fieldName]).filter(v => v !== null && v !== undefined && v !== '');
-				
-				const nullCount = table.sample_data.filter(row => 
+
+				const nullCount = table.sample_data.filter(row =>
 					row[fieldName] === null || row[fieldName] === undefined || row[fieldName] === ''
 				).length;
 				const nullRate = (nullCount / sampleSize) * 100;
-				
+
 				if (analysis.field_analysis[fieldName]) {
 					analysis.field_analysis[fieldName].null_rate_sample = Math.round(nullRate);
 				}
@@ -288,10 +356,10 @@ function analyzeAnalyticsCompatibility(tables) {
 						const ssnCount = stringValues.filter(v => ssnPattern.test(v)).length;
 						const creditCardCount = stringValues.filter(v => creditCardPattern.test(v)).length;
 						const phoneCount = stringValues.filter(v => phonePattern.test(v.replace(/[\s\-\(\)]/g, ''))).length;
-						
+
 						// If >30% of values match PII patterns, flag as PII
 						const threshold = Math.max(1, Math.floor(stringValues.length * 0.3));
-						
+
 						if (emailCount >= threshold) {
 							analysis.data_quality.potential_pii.push(fieldName + ' (emails)');
 						}
@@ -309,13 +377,13 @@ function analyzeAnalyticsCompatibility(tables) {
 			});
 
 			// Data freshness analysis for timestamp fields - use enhanced detection
-			const timestampField = analysis.analytics_features.has_timestamp ? 
+			const timestampField = analysis.analytics_features.has_timestamp ?
 				(table.schema || []).find(f => {
 					const fieldType = (f.nested_type || '').split('(')[0].toUpperCase();
 					const fieldName = f.column_name.toLowerCase();
 					return validTimestampTypes.has(fieldType) || timestampFieldNamePatterns.test(fieldName);
 				}) : null;
-			
+
 			if (timestampField) {
 				const timestamps = table.sample_data
 					.map(row => row[timestampField.column_name])
@@ -335,7 +403,7 @@ function analyzeAnalyticsCompatibility(tables) {
 					const minTimestamp = Math.min(...timestamps);
 					const daysSinceNewest = Math.floor((now - maxTimestamp) / (1000 * 60 * 60 * 24));
 					const daysSinceOldest = Math.floor((now - minTimestamp) / (1000 * 60 * 60 * 24));
-					
+
 					analysis.data_freshness = {
 						timestamp_field: timestampField.column_name,
 						newest_record_days_ago: daysSinceNewest,
@@ -351,16 +419,16 @@ function analyzeAnalyticsCompatibility(tables) {
 		analysis.table_category = 'unknown';
 		const tableName = table.table_name.toLowerCase();
 		const isEventTableByName = eventTablePatterns.test(table.table_name);
-		
+
 		// Event table detection - prioritize table name patterns
-		if (isEventTableByName || 
+		if (isEventTableByName ||
 			(analysis.analytics_features.has_timestamp && analysis.analytics_features.has_user_id) ||
-			(analysis.analytics_features.has_timestamp && 
-			 (analysis.analytics_features.has_event_name || analysis.analytics_features.has_event_id))) {
-			
+			(analysis.analytics_features.has_timestamp &&
+				(analysis.analytics_features.has_event_name || analysis.analytics_features.has_event_id))) {
+
 			analysis.table_category = 'event';
 			insights.event_tables.push(analysis);
-			
+
 			// Higher Mixpanel score for properly structured event tables
 			if (analysis.analytics_features.has_timestamp && analysis.analytics_features.has_user_id) {
 				analysis.mixpanel_score += 2;
@@ -392,6 +460,9 @@ function analyzeAnalyticsCompatibility(tables) {
 		// Penalize Mixpanel score for high schema complexity
 		const complexityPenalty = Math.min(3, analysis.schema_complexity.struct_fields + analysis.schema_complexity.repeated_fields);
 		analysis.mixpanel_score = Math.max(0, analysis.mixpanel_score - complexityPenalty);
+
+		// Cap Mixpanel score at maximum of 10
+		analysis.mixpanel_score = Math.min(10, analysis.mixpanel_score);
 
 		// Mixpanel readiness (for event tables specifically)
 		if (analysis.table_category === 'event' && analysis.mixpanel_score >= 4) {
@@ -496,7 +567,7 @@ function unwrapBigQueryValue(value) {
 	if (value === null || value === undefined) {
 		return null;
 	}
-	
+
 	// Handle arrays (REPEATED fields)
 	if (Array.isArray(value)) {
 		return value.map(item => {
@@ -506,14 +577,14 @@ function unwrapBigQueryValue(value) {
 			return unwrapBigQueryValue(item);
 		});
 	}
-	
+
 	// Handle objects that might be wrapped values
 	if (typeof value === 'object' && value !== null) {
 		// If it has a 'v' property, unwrap it
 		if ('v' in value) {
 			return unwrapBigQueryValue(value.v);
 		}
-		
+
 		// Handle STRUCT fields (objects with 'f' property containing field array)
 		if ('f' in value && Array.isArray(value.f)) {
 			const struct = {};
@@ -524,7 +595,7 @@ function unwrapBigQueryValue(value) {
 			});
 			return struct;
 		}
-		
+
 		// Regular object - recursively unwrap all properties
 		const unwrapped = {};
 		for (const [key, val] of Object.entries(value)) {
@@ -532,7 +603,7 @@ function unwrapBigQueryValue(value) {
 		}
 		return unwrapped;
 	}
-	
+
 	// Primitive values - return as is
 	return value;
 }
@@ -580,7 +651,7 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, schema, max
 									row.f.forEach((field, index) => {
 										if (schema && schema[index]) {
 											const fieldName = schema[index].column_name || schema[index].name;
-											
+
 											// Handle null/undefined values
 											if (field.v === null || field.v === undefined) {
 												obj[fieldName] = null;
@@ -799,7 +870,7 @@ async function runAudit() {
 	console.log(`${colors.green}▸ Region:${colors.nc}           ${config.location}`);
 	console.log(`${colors.green}▸ Table Filter:${colors.nc}    ${config.tableFilter ? config.tableFilter.join(", ") : "All tables"}`);
 	console.log(`${colors.green}▸ Sample Limit:${colors.nc}     ${config.sampleLimit}`);
-	console.log(`${colors.green}▸ Permission Mode:${colors.nc}  ${permissionMode === "jobUser" ? "JobUser (query access)" : "DataViewer (REST API only)"}`);	
+	console.log(`${colors.green}▸ Permission Mode:${colors.nc}  ${permissionMode === "jobUser" ? "JobUser (query access)" : "DataViewer (REST API only)"}`);
 	console.log(`${colors.green}▸ Output Directory:${colors.nc} ${config.outputDir}`);
 	console.log("-------------------------------------------\n");
 
@@ -857,12 +928,12 @@ async function runAudit() {
 	try {
 		if (permissionMode === "jobUser") {
 			console.log(`${colors.yellow}Fetching table list from INFORMATION_SCHEMA.TABLES...${colors.nc}`);
-			
+
 			// Check if any patterns contain glob characters
-			const hasGlobPatterns = config.tableFilter && config.tableFilter.some(pattern => 
+			const hasGlobPatterns = config.tableFilter && config.tableFilter.some(pattern =>
 				pattern.includes('*') || pattern.includes('?')
 			);
-			
+
 			let tablesQuery = `
 	            SELECT 
 	                table_name, 
@@ -882,7 +953,7 @@ async function runAudit() {
 
 			const [queryResults] = await bigquery.query({ query: tablesQuery, location: config.location });
 			let allTables = queryResults;
-			
+
 			// Apply glob pattern filtering if needed
 			if (config.tableFilter && config.tableFilter.length > 0 && hasGlobPatterns) {
 				tables = allTables.filter(table => {

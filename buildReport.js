@@ -600,30 +600,62 @@ function generateHtmlReport(data) {
                 let html = '';
                 
                 if (patterns.timestamp_fields && patterns.timestamp_fields.length > 0) {
+                    const truncated = patterns.timestamp_fields.slice(0, 3).join(', ') + (patterns.timestamp_fields.length > 3 ? ', ...' : '');
+                    const full = patterns.timestamp_fields.join(', ');
                     html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mint-150);">
-                        <div style="font-weight: 600; color: var(--mint-150); font-size: 0.9rem; margin-bottom: 3px;">⏰ Timestamp Fields (\${patterns.timestamp_fields.length})</div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.timestamp_fields.slice(0, 3).join(', ')}\${patterns.timestamp_fields.length > 3 ? ', ...' : ''}</div>
+                        <div style="font-weight: 600; color: var(--mint-150); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('timestamp')">
+                            <span>⏰ Timestamp Fields (\${patterns.timestamp_fields.length})</span>
+                            <span id="timestamp-arrow" style="color: var(--mint-150); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+                            <div id="timestamp-truncated">\${truncated}</div>
+                            <div id="timestamp-full" style="display: none;">\${full}</div>
+                        </div>
                     </div>\`;
                 }
                 
                 if (patterns.user_id_fields && patterns.user_id_fields.length > 0) {
+                    const truncated = patterns.user_id_fields.slice(0, 3).join(', ') + (patterns.user_id_fields.length > 3 ? ', ...' : '');
+                    const full = patterns.user_id_fields.join(', ');
                     html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--accent);">
-                        <div style="font-weight: 600; color: var(--accent); font-size: 0.9rem; margin-bottom: 3px;">👤 User ID Fields (\${patterns.user_id_fields.length})</div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.user_id_fields.slice(0, 3).join(', ')}\${patterns.user_id_fields.length > 3 ? ', ...' : ''}</div>
+                        <div style="font-weight: 600; color: var(--accent); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('userid')">
+                            <span>👤 User ID Fields (\${patterns.user_id_fields.length})</span>
+                            <span id="userid-arrow" style="color: var(--accent); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+                            <div id="userid-truncated">\${truncated}</div>
+                            <div id="userid-full" style="display: none;">\${full}</div>
+                        </div>
                     </div>\`;
                 }
                 
                 if (patterns.event_id_fields && patterns.event_id_fields.length > 0) {
+                    const truncated = patterns.event_id_fields.slice(0, 3).join(', ') + (patterns.event_id_fields.length > 3 ? ', ...' : '');
+                    const full = patterns.event_id_fields.join(', ');
                     html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mustard-100);">
-                        <div style="font-weight: 600; color: var(--mustard-100); font-size: 0.9rem; margin-bottom: 3px;">🔑 Event ID Fields (\${patterns.event_id_fields.length})</div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.event_id_fields.slice(0, 3).join(', ')}\${patterns.event_id_fields.length > 3 ? ', ...' : ''}</div>
+                        <div style="font-weight: 600; color: var(--mustard-100); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('eventid')">
+                            <span>🔑 Event ID Fields (\${patterns.event_id_fields.length})</span>
+                            <span id="eventid-arrow" style="color: var(--mustard-100); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+                            <div id="eventid-truncated">\${truncated}</div>
+                            <div id="eventid-full" style="display: none;">\${full}</div>
+                        </div>
                     </div>\`;
                 }
                 
                 if (patterns.session_fields && patterns.session_fields.length > 0) {
+                    const truncated = patterns.session_fields.slice(0, 3).join(', ') + (patterns.session_fields.length > 3 ? ', ...' : '');
+                    const full = patterns.session_fields.join(', ');
                     html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--lava-100);">
-                        <div style="font-weight: 600; color: var(--lava-100); font-size: 0.9rem; margin-bottom: 3px;">🔗 Session Fields (\${patterns.session_fields.length})</div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary);">\${patterns.session_fields.slice(0, 3).join(', ')}\${patterns.session_fields.length > 3 ? ', ...' : ''}</div>
+                        <div style="font-weight: 600; color: var(--lava-100); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('session')">
+                            <span>🔗 Session Fields (\${patterns.session_fields.length})</span>
+                            <span id="session-arrow" style="color: var(--lava-100); font-size: 0.8rem;">▶</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+                            <div id="session-truncated">\${truncated}</div>
+                            <div id="session-full" style="display: none;">\${full}</div>
+                        </div>
                     </div>\`;
                 }
                 
@@ -907,6 +939,27 @@ function generateHtmlReport(data) {
                 }
                 tablesContainer.innerHTML = html;
             }
+
+            // Toggle field pattern visibility (expand/collapse) - make globally accessible
+            window.toggleFieldPattern = function(patternType) {
+                const truncatedElement = document.getElementById(\`\${patternType}-truncated\`);
+                const fullElement = document.getElementById(\`\${patternType}-full\`);
+                const arrowElement = document.getElementById(\`\${patternType}-arrow\`);
+                
+                if (!truncatedElement || !fullElement || !arrowElement) return;
+                
+                if (fullElement.style.display === 'none') {
+                    // Expand
+                    truncatedElement.style.display = 'none';
+                    fullElement.style.display = 'block';
+                    arrowElement.textContent = '▼';
+                } else {
+                    // Collapse
+                    truncatedElement.style.display = 'block';
+                    fullElement.style.display = 'none';
+                    arrowElement.textContent = '▶';
+                }
+            };
 
             function addEventListeners() {
                 const expandCollapseBtn = document.getElementById('expandCollapseBtn');
