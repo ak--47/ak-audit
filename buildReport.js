@@ -70,7 +70,7 @@ function generateHtmlReport(data) {
             letter-spacing: 0.5px;
             margin-bottom: 10px;
         }
-        .card .number { font-size: 2.5rem; font-weight: 700; color: var(--text-primary); }
+        .card .number { font-size: 2rem; font-weight: 700; color: var(--text-primary); }
         .card.error .number { color: var(--error); }
         .search-box { margin-bottom: 25px; display: flex; gap: 15px; align-items: center; }
         .search-box input {

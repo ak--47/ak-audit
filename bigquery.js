@@ -528,7 +528,7 @@ const csvEscape = str => {
 async function testBigQueryAuth() {
 	console.log(`${colors.yellow}Testing BigQuery authentication and connectivity...${colors.nc}`);
 	try {
-		await bigquery.getDatasets();
+		const datasets = await bigquery.getDatasets();
 		console.log(`${colors.green}✓ BigQuery authentication successful.${colors.nc}`);
 
 		// Test if we have query permissions (jobUser role)
@@ -539,7 +539,8 @@ async function testBigQueryAuth() {
 				dryRun: true
 			});
 			console.log(`${colors.green}✓ Query permissions available (jobUser role detected).${colors.nc}\n`);
-			return "jobUser";
+			return "dataViewer"
+			// return "jobUser";
 		} catch (queryError) {
 			console.log(`${colors.yellow}⚠ Query permissions not available - will use REST API only (dataViewer mode).${colors.nc}\n`);
 			return "dataViewer";
@@ -696,62 +697,76 @@ async function getTablesViaREST(projectId, datasetId) {
 		const authClient = await auth.getClient();
 		const accessToken = await authClient.getAccessToken();
 
-		const url = `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables`;
+		let allTables = [];
+		let nextPageToken = null;
 
-		return new Promise((resolve, reject) => {
-			const options = {
-				headers: {
-					Authorization: `Bearer ${accessToken.token}`,
-					"Content-Type": "application/json"
-				},
-				timeout: 30000 // 30 second timeout
-			};
+		do {
+			const url = new URL(`https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables`);
+			url.searchParams.set('maxResults', '1000'); // Increase from default 50 to 1000
+			if (nextPageToken) {
+				url.searchParams.set('pageToken', nextPageToken);
+			}
 
-			const req = https.get(url, options, res => {
-				// Check for HTTP error status codes
-				if (res.statusCode < 200 || res.statusCode >= 300) {
-					reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
-					return;
-				}
+			const response = await new Promise((resolve, reject) => {
+				const options = {
+					headers: {
+						Authorization: `Bearer ${accessToken.token}`,
+						"Content-Type": "application/json"
+					},
+					timeout: 30000 // 30 second timeout
+				};
 
-				let data = "";
-				res.on("data", chunk => (data += chunk));
-				res.on("end", () => {
-					try {
-						const response = JSON.parse(data);
-						if (response.error) {
-							reject(new Error(`BigQuery API Error: ${response.error.message}`));
-							return;
-						}
-
-						if (response.tables) {
-							const tables = response.tables.map(table => ({
-								table_name: table.tableReference.tableId,
-								table_type: table.type === "VIEW" ? "VIEW" : "BASE TABLE",
-								creation_time: new Date(parseInt(table.creationTime)).toISOString().replace("T", " ").substring(0, 19),
-								ddl: null // Not available via REST API
-							}));
-							resolve(tables);
-						} else {
-							resolve([]);
-						}
-					} catch (parseError) {
-						reject(new Error(`Failed to parse response: ${parseError.message}`));
+				const req = https.get(url.toString(), options, res => {
+					// Check for HTTP error status codes
+					if (res.statusCode < 200 || res.statusCode >= 300) {
+						reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+						return;
 					}
+
+					let data = "";
+					res.on("data", chunk => (data += chunk));
+					res.on("end", () => {
+						try {
+							const response = JSON.parse(data);
+							if (response.error) {
+								reject(new Error(`BigQuery API Error: ${response.error.message}`));
+								return;
+							}
+							resolve(response);
+						} catch (parseError) {
+							reject(new Error(`Failed to parse response: ${parseError.message}`));
+						}
+					});
 				});
+
+				req.on("error", error => {
+					reject(new Error(`Request failed: ${error.message}`));
+				});
+
+				req.on("timeout", () => {
+					req.destroy();
+					reject(new Error("Request timed out after 30 seconds"));
+				});
+
+				req.setTimeout(30000);
 			});
 
-			req.on("error", error => {
-				reject(new Error(`Request failed: ${error.message}`));
-			});
+			// Process this page's tables
+			if (response.tables) {
+				const tables = response.tables.map(table => ({
+					table_name: table.tableReference.tableId,
+					table_type: table.type === "VIEW" ? "VIEW" : "BASE TABLE",
+					creation_time: new Date(parseInt(table.creationTime)).toISOString().replace("T", " ").substring(0, 19),
+					ddl: null // Not available via REST API
+				}));
+				allTables.push(...tables);
+			}
 
-			req.on("timeout", () => {
-				req.destroy();
-				reject(new Error("Request timed out after 30 seconds"));
-			});
+			// Check for next page
+			nextPageToken = response.nextPageToken;
+		} while (nextPageToken);
 
-			req.setTimeout(30000);
-		});
+		return allTables;
 	} catch (error) {
 		throw new Error(`Authentication failed: ${error.message}`);
 	}
@@ -1532,6 +1547,74 @@ async function runAudit() {
 	}
 }
 
+
+// --- New Function for Advanced Data Quality ---
+// todo: implement this in the main flow
+async function getAdvancedDataQualityMetrics(projectId, datasetId, tableName, schema) {
+    if (!schema || schema.length === 0) return {};
+
+    // Select non-nested, non-repeated columns for analysis
+    const columnsToAnalyze = schema
+        .filter(field => !field.nested_field_path.includes('.') && field.nested_type !== 'STRUCT' && field.nested_type !== 'RECORD' && !field.nested_type.startsWith('ARRAY'))
+        .map(field => field.column_name);
+
+    if (columnsToAnalyze.length === 0) return {};
+
+    const qualityMetrics = {};
+
+    // Build a single query to get all metrics at once for efficiency
+    const subqueries = columnsToAnalyze.map(col => `APPROX_COUNT_DISTINCT(\`${col}\`) AS ${col}_distinct_count`);
+    const query = `SELECT ${subqueries.join(', ')} FROM \`${projectId}.${datasetId}.${tableName}\``;
+
+    try {
+        const [results] = await bigquery.query({ query, location: config.location });
+        if (results.length > 0) {
+            const counts = results[0];
+            for (const col of columnsToAnalyze) {
+                qualityMetrics[col] = {
+                    approx_distinct_count: counts[`${col}_distinct_count`]
+                };
+            }
+        }
+        return qualityMetrics;
+    } catch (e) {
+        console.log(`${colors.yellow}  └ ⚠ Could not run advanced data quality query for '${tableName}'. ${e.message}${colors.nc}`);
+        return {}; // Return empty object on failure
+    }
+}
+
+
+async function getSecurityPolicies(projectId, datasetId, tableName) {
+    const policies = {
+        row_access_policies: [],
+        data_masking_policies: []
+    };
+
+    try {
+        // Query for Row Access Policies
+        const rlsQuery = `
+            SELECT policy_name, filter_expression 
+            FROM \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.ROW_ACCESS_POLICIES\`
+            WHERE table_name = '${tableName}' AND table_schema = '${datasetId}'`;
+        const [rlsResults] = await bigquery.query({ query: rlsQuery, location: config.location });
+        policies.row_access_policies = rlsResults;
+
+        // Query for Data Masking on columns of this table
+        const maskingQuery = `
+            SELECT c.column_name, c.rounding_mode, c.masking_expression
+            FROM \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
+            JOIN \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.COLUMNS\` c
+                ON cfp.table_name = c.table_name AND cfp.table_schema = c.table_schema AND cfp.column_name = c.column_name
+            WHERE c.table_name = '${tableName}' AND c.table_schema = '${datasetId}' AND c.masking_expression IS NOT NULL`;
+        const [maskingResults] = await bigquery.query({ query: maskingQuery, location: config.location });
+        policies.data_masking_policies = maskingResults;
+        
+        return policies;
+    } catch (e) {
+        console.log(`${colors.yellow}  └ ⚠ Could not fetch security policies for '${tableName}'. ${e.message}${colors.nc}`);
+        return policies;
+    }
+}
 
 if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
 	runAudit();
