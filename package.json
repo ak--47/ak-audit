@@ -4,8 +4,10 @@
 	"main": "index.js",
 	"type": "module",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"prune": "rm -rf ./output/*",
+		"test": "vitest",
+		"test:run": "vitest run",
+		"test:integration": "vitest run test/integration.test.js",
+		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser",
 		"serve": "npx serve ./output/reports",
 		"rebuild": "node rebuild.js",
 		"rebuild:watch": "nodemon rebuild.js"
@@ -17,5 +19,8 @@
 	"dependencies": {
 		"@google-cloud/bigquery": "^8.1.1",
 		"google-auth-library": "^9.0.0"
+	},
+	"devDependencies": {
+		"vitest": "^3.2.4"
 	}
 }

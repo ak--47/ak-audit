@@ -1,5 +1,12 @@
+// HTML template tag for syntax highlighting
+const html = (strings, ...values) => {
+    return strings.reduce((result, string, i) => {
+        return result + string + (values[i] || '');
+    }, '');
+};
+
 function generateHtmlReport(data) {
-    return `
+    return html`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -184,12 +191,13 @@ function generateHtmlReport(data) {
             border-radius: 12px; 
             padding: 20px; 
             position: relative;
-            height: 380px;
-            overflow: hidden;
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
         .d3-chart {
             width: 100%;
-            height: calc(100% - 40px);
+            min-height: 300px;
         }
         .d3-bar {
             transition: opacity 0.2s ease;
@@ -388,12 +396,8 @@ function generateHtmlReport(data) {
             <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">📊 Table Analytics</h2>
             <div class="charts-grid">
                 <div class="chart-container full-width">
-                    <div class="chart-title">Row Count Distribution (Top 15)</div>
+                    <div class="chart-title">Row Count Distribution (Top 20)</div>
                     <svg id="rowCountChart" class="d3-chart"></svg>
-                </div>
-                <div class="chart-container full-width">
-                    <div class="chart-title">Table Size Distribution (Top 15)</div>
-                    <svg id="sizeChart" class="d3-chart"></svg>
                 </div>
                 <div class="chart-container">
                     <div class="chart-title">Table Types</div>
@@ -431,6 +435,19 @@ function generateHtmlReport(data) {
                     <div style="font-size: 1.5rem; font-weight: 700; color: var(--mustard-100);" id="viewDependencies">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">View Dependencies</div>
                 </div>
+            </div>
+            
+            <!-- ERD Table Selection -->
+            <div style="background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h4 style="color: var(--mint-100); font-size: 0.95rem; margin: 0;">📊 Select Tables for Diagram</h4>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="selectAllTables" style="padding: 4px 8px; background: var(--mint-150); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Select All</button>
+                        <button id="clearAllTables" style="padding: 4px 8px; background: var(--text-secondary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Clear All</button>
+                    </div>
+                </div>
+                <input type="text" id="tableSearchInput" placeholder="Search tables..." style="width: 100%; padding: 8px 12px; margin-bottom: 12px; font-size: 0.85rem; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                <div id="tableCheckboxes" style="max-height: 150px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 8px; background: var(--bg-dark); border-radius: 6px;"></div>
             </div>
             
             <!-- Interactive Network Diagram -->
@@ -1161,7 +1178,7 @@ function generateHtmlReport(data) {
                 const rowCountData = data.tables
                     .filter(function(t) { return t.row_count > 0; })
                     .sort(function(a, b) { return b.row_count - a.row_count; })
-                    .slice(0, 15);
+                    .slice(0, 20);
                 
                 renderD3BarChart('rowCountChart', rowCountData, {
                     valueAccessor: function(d) { return d.row_count; },
@@ -1175,19 +1192,6 @@ function generateHtmlReport(data) {
                     tooltipLabel: 'Rows'
                 });
 
-                // Table Size Distribution (D3 Bar Chart)
-                const sizeData = data.tables
-                    .filter(function(t) { return t.size_mb > 0; })
-                    .sort(function(a, b) { return b.size_mb - a.size_mb; })
-                    .slice(0, 15);
-                
-                renderD3BarChart('sizeChart', sizeData, {
-                    valueAccessor: function(d) { return d.size_mb; },
-                    labelAccessor: function(d) { return d.table_name; },
-                    color: 'rgba(120, 86, 255, 0.8)',
-                    formatValue: function(d) { return d.toFixed(1) + ' MB'; },
-                    tooltipLabel: 'Size'
-                });
 
                 
 
@@ -1283,17 +1287,22 @@ function generateHtmlReport(data) {
                 const container = svg.node().parentNode;
                 const margin = { top: 20, right: 20, bottom: 40, left: 120 };
                 const width = container.clientWidth - margin.left - margin.right;
-                const height = 300 - margin.top - margin.bottom;
+                
+                // Dynamic height based on number of items (minimum 25px per bar, maximum 600px)
+                const barHeight = Math.max(25, Math.min(40, 600 / data.length));
+                const dynamicHeight = Math.max(300, data.length * barHeight);
+                const height = dynamicHeight - margin.top - margin.bottom;
                 
                 svg.attr('width', container.clientWidth)
-                   .attr('height', 300);
+                   .attr('height', dynamicHeight);
                 
                 const g = svg.append('g')
                     .attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
                 
                 // Scales
+                const maxValue = d3.max(data, function(d) { return options.valueAccessor(d); });
                 const xScale = d3.scaleLinear()
-                    .domain([0, d3.max(data, function(d) { return options.valueAccessor(d); })])
+                    .domain([0, maxValue * 1.1]) // Add 10% padding for labels
                     .range([0, width]);
                 
                 const yScale = d3.scaleBand()
@@ -1475,6 +1484,7 @@ function generateHtmlReport(data) {
                 renderRelationshipSummary();
                 renderJoinKeysAnalysis();
                 renderViewDependenciesAnalysis();
+                initializeTableCheckboxes();
                 renderInteractiveNetworkDiagram();
                 return; // Skip the old chaotic visualization
             }
@@ -1542,6 +1552,100 @@ function generateHtmlReport(data) {
                 joinKeysDiv.innerHTML = html;
             }
             
+            // Global variable to track selected tables for ERD
+            let selectedTables = new Set();
+            
+            function initializeTableCheckboxes() {
+                const checkboxContainer = document.getElementById('tableCheckboxes');
+                if (!checkboxContainer) return;
+                
+                // Clear existing checkboxes
+                checkboxContainer.innerHTML = '';
+                
+                // Start with no tables selected (blank diagram)
+                selectedTables.clear();
+                
+                // Create checkboxes for all tables
+                data.lineage.nodes.forEach(function(node) {
+                    const checkboxDiv = document.createElement('div');
+                    checkboxDiv.style.cssText = 'display: flex; align-items: center; padding: 4px 8px; background: var(--bg-medium); border-radius: 4px; border: 1px solid var(--border-color);';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = 'table-' + node.id;
+                    checkbox.value = node.id;
+                    checkbox.style.marginRight = '6px';
+                    checkbox.addEventListener('change', function() {
+                        if (this.checked) {
+                            selectedTables.add(node.id);
+                        } else {
+                            selectedTables.delete(node.id);
+                        }
+                        renderInteractiveNetworkDiagram();
+                    });
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = 'table-' + node.id;
+                    label.textContent = node.id;
+                    label.title = node.id; // Add tooltip with full table name
+                    label.style.cssText = 'cursor: pointer; font-size: 0.85rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;';
+                    if (node.type === 'VIEW') {
+                        label.style.color = 'var(--mint-150)';
+                    } else {
+                        label.style.color = 'var(--accent)';
+                    }
+                    
+                    checkboxDiv.appendChild(checkbox);
+                    checkboxDiv.appendChild(label);
+                    checkboxContainer.appendChild(checkboxDiv);
+                });
+                
+                // Add event listeners for Select All and Clear All buttons
+                const selectAllBtn = document.getElementById('selectAllTables');
+                const clearAllBtn = document.getElementById('clearAllTables');
+                
+                if (selectAllBtn) {
+                    selectAllBtn.addEventListener('click', function() {
+                        data.lineage.nodes.forEach(function(node) {
+                            selectedTables.add(node.id);
+                            const checkbox = document.getElementById('table-' + node.id);
+                            if (checkbox) checkbox.checked = true;
+                        });
+                        renderInteractiveNetworkDiagram();
+                    });
+                }
+                
+                if (clearAllBtn) {
+                    clearAllBtn.addEventListener('click', function() {
+                        selectedTables.clear();
+                        data.lineage.nodes.forEach(function(node) {
+                            const checkbox = document.getElementById('table-' + node.id);
+                            if (checkbox) checkbox.checked = false;
+                        });
+                        renderInteractiveNetworkDiagram();
+                    });
+                }
+                
+                // Add search functionality
+                const searchInput = document.getElementById('tableSearchInput');
+                if (searchInput) {
+                    searchInput.addEventListener('input', function() {
+                        const searchTerm = this.value.toLowerCase().trim();
+                        
+                        data.lineage.nodes.forEach(function(node) {
+                            const checkboxDiv = document.getElementById('table-' + node.id).parentNode;
+                            const tableName = node.id.toLowerCase();
+                            
+                            if (tableName.includes(searchTerm)) {
+                                checkboxDiv.style.display = 'flex';
+                            } else {
+                                checkboxDiv.style.display = 'none';
+                            }
+                        });
+                    });
+                }
+            }
+            
             function renderInteractiveNetworkDiagram() {
                 const svg = d3.select('#networkDiagram');
                 const container = svg.node().parentNode;
@@ -1551,6 +1655,16 @@ function generateHtmlReport(data) {
                 
                 svg.attr('width', width).attr('height', height);
                 svg.selectAll('*').remove();
+                
+                // Filter nodes and edges based on selected tables
+                const filteredNodes = data.lineage.nodes.filter(function(node) {
+                    return selectedTables.has(node.id);
+                });
+                
+                const filteredEdges = data.lineage.edges.filter(function(edge) {
+                    return selectedTables.has(edge.source.id || edge.source) && 
+                           selectedTables.has(edge.target.id || edge.target);
+                });
                 
                 // Add zoom behavior
                 const zoom = d3.zoom()
@@ -1562,9 +1676,21 @@ function generateHtmlReport(data) {
                 svg.call(zoom);
                 const g = svg.append('g');
                 
-                // Create a cleaner force simulation
-                const simulation = d3.forceSimulation(data.lineage.nodes)
-                    .force('link', d3.forceLink(data.lineage.edges).id(function(d) { return d.id; }).distance(100).strength(0.5))
+                // Show message if no tables selected
+                if (filteredNodes.length === 0) {
+                    const message = g.append('text')
+                        .attr('x', width / 2)
+                        .attr('y', height / 2)
+                        .attr('text-anchor', 'middle')
+                        .attr('fill', 'var(--text-secondary)')
+                        .attr('font-size', '16px')
+                        .text('Select tables above to view relationships');
+                    return;
+                }
+                
+                // Create a cleaner force simulation with filtered data
+                const simulation = d3.forceSimulation(filteredNodes)
+                    .force('link', d3.forceLink(filteredEdges).id(function(d) { return d.id; }).distance(100).strength(0.5))
                     .force('charge', d3.forceManyBody().strength(-300))
                     .force('center', d3.forceCenter(width / 2, height / 2))
                     .force('collision', d3.forceCollide().radius(30));
@@ -1572,7 +1698,7 @@ function generateHtmlReport(data) {
                 // Add links
                 const links = g.append('g')
                     .selectAll('line')
-                    .data(data.lineage.edges)
+                    .data(filteredEdges)
                     .join('line')
                     .attr('stroke', function(d) { return d.type === 'view_dependency' ? 'var(--mustard-100)' : 'var(--mint-150)'; })
                     .attr('stroke-width', function(d) { return d.type === 'view_dependency' ? 2 : 1; })
@@ -1582,7 +1708,7 @@ function generateHtmlReport(data) {
                 // Add link labels for join keys
                 const linkLabels = g.append('g')
                     .selectAll('text')
-                    .data(data.lineage.edges.filter(function(d) { return d.type === 'join_key' && d.label; }))
+                    .data(filteredEdges.filter(function(d) { return d.type === 'join_key' && d.label; }))
                     .join('text')
                     .attr('font-size', '10px')
                     .attr('fill', 'var(--text-secondary)')
@@ -1594,7 +1720,7 @@ function generateHtmlReport(data) {
                 // Add nodes
                 const nodes = g.append('g')
                     .selectAll('g')
-                    .data(data.lineage.nodes)
+                    .data(filteredNodes)
                     .join('g')
                     .attr('class', 'network-node')
                     .style('cursor', 'pointer')
