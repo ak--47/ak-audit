@@ -1619,6 +1619,11 @@ async function getSecurityPolicies(projectId, datasetId, tableName) {
 }
 
 if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-	runAudit();
+	runAudit().then(() => {
+		process.exit(0);
+	}).catch(error => {
+		console.error(`${colors.red}❌ Audit failed: ${error.message}${colors.nc}`);
+		process.exit(1);
+	});
 }
 

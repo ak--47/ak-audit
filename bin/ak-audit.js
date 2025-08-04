@@ -6,6 +6,16 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// --- Colors for Terminal Output (matching bigquery.js) ---
+const colors = {
+	red: "\x1b[31m",
+	green: "\x1b[32m",
+	yellow: "\x1b[33m",
+	cyan: "\x1b[36m",
+	magenta: "\x1b[35m",
+	nc: "\x1b[0m"
+};
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -74,14 +84,14 @@ if (argv.credentials) {
   process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(argv.credentials);
 }
 
-console.log(`\n🔍 BigQuery Dataset Auditor\n`);
-console.log(`Configuration:`);
-console.log(`  Project ID: ${argv.project}`);
-console.log(`  Dataset ID: ${argv.dataset}`);
-console.log(`  Table Filter: ${argv.filter || 'All tables'}`);
-console.log(`  Location: ${argv.location}`);
-console.log(`  Sample Limit: ${argv.samples}`);
-console.log(`  Output Directory: ${argv.output}`);
+console.log(`\n${colors.cyan}🔍 BigQuery Dataset Auditor${colors.nc}\n`);
+console.log(`${colors.cyan}Configuration:${colors.nc}`);
+console.log(`  Project ID: ${colors.green}${argv.project}${colors.nc}`);
+console.log(`  Dataset ID: ${colors.green}${argv.dataset}${colors.nc}`);
+console.log(`  Table Filter: ${colors.yellow}${argv.filter || 'All tables'}${colors.nc}`);
+console.log(`  Location: ${colors.green}${argv.location}${colors.nc}`);
+console.log(`  Sample Limit: ${colors.green}${argv.samples}${colors.nc}`);
+console.log(`  Output Directory: ${colors.green}${argv.output}${colors.nc}`);
 console.log('');
 
 // Build arguments for bigquery.js in the correct positional order
@@ -108,6 +118,6 @@ child.on('exit', (code) => {
 });
 
 child.on('error', (error) => {
-  console.error('❌ Failed to start audit:', error.message);
+  console.error(`${colors.red}❌ Failed to start audit: ${error.message}${colors.nc}`);
   process.exit(1);
 });
