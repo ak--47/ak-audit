@@ -59,7 +59,6 @@ ak-audit --project my-project --dataset my-dataset --filter "users,events_*"
 | `--samples` | `-n` | `10` | Number of sample rows per table |
 | `--output` | `-o` | `./output` | Output directory for results |
 | `--credentials` | `-c` | *none* | Path to Google Cloud credentials JSON |
-| `--force-mode` | | *none* | Force permission mode (`dataViewer`/`jobUser`) |
 | `--help` | `-h` | | Show help information |
 | `--version` | | | Show version number |
 
@@ -106,9 +105,6 @@ ak-audit --project my-project --dataset my-dataset --filter "users,events*,order
 
 # Use custom credentials file
 ak-audit --project my-project --dataset my-dataset --credentials ./service-account.json
-
-# Force specific permission mode
-ak-audit --project my-project --dataset my-dataset --force-mode dataViewer
 
 # Increase sample size for detailed analysis
 ak-audit --project my-project --dataset my-dataset --samples 50

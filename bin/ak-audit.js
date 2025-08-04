@@ -2,12 +2,12 @@
 
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { BigQuery } from '@google-cloud/bigquery';
-import { promises as fs } from 'fs';
-import generateHtmlReport from '../buildReport.js';
+import { spawn } from 'child_process';
 import path from 'path';
-import https from 'https';
-import { GoogleAuth } from 'google-auth-library';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // --- CLI Configuration ---
 const argv = yargs(hideBin(process.argv))
@@ -41,8 +41,7 @@ const argv = yargs(hideBin(process.argv))
   .option('filter', {
     alias: 'f',
     type: 'string',
-    description: 'Comma-separated list of table names to audit (supports glob patterns)',
-    coerce: (arg) => arg ? arg.split(',').map(t => t.trim()) : null
+    description: 'Comma-separated list of table names to audit (supports glob patterns)'
   })
   .option('samples', {
     alias: 'n',
@@ -61,11 +60,6 @@ const argv = yargs(hideBin(process.argv))
     type: 'string',
     description: 'Path to Google Cloud credentials JSON file'
   })
-  .option('force-mode', {
-    type: 'string',
-    description: 'Force specific permission mode',
-    choices: ['dataViewer', 'jobUser']
-  })
   .help('h')
   .alias('h', 'help')
   .example('$0 --project my-project --dataset my-dataset', 'Audit a specific project and dataset')
@@ -80,37 +74,40 @@ if (argv.credentials) {
   process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve(argv.credentials);
 }
 
-// Import the main audit logic from bigquery.js
-const auditConfig = {
-  projectId: argv.project,
-  datasetId: argv.dataset,
-  tableFilter: argv.filter,
-  location: argv.location,
-  sampleLimit: argv.samples,
-  outputDir: argv.output,
-  forceMode: argv.forceMode
-};
-
 console.log(`\n🔍 BigQuery Dataset Auditor\n`);
 console.log(`Configuration:`);
-console.log(`  Project ID: ${auditConfig.projectId}`);
-console.log(`  Dataset ID: ${auditConfig.datasetId}`);
-console.log(`  Table Filter: ${auditConfig.tableFilter ? auditConfig.tableFilter.join(', ') : 'All tables'}`);
-console.log(`  Location: ${auditConfig.location}`);
-console.log(`  Sample Limit: ${auditConfig.sampleLimit}`);
-console.log(`  Output Directory: ${auditConfig.outputDir}`);
-if (auditConfig.forceMode) {
-  console.log(`  Force Mode: ${auditConfig.forceMode}`);
-}
+console.log(`  Project ID: ${argv.project}`);
+console.log(`  Dataset ID: ${argv.dataset}`);
+console.log(`  Table Filter: ${argv.filter || 'All tables'}`);
+console.log(`  Location: ${argv.location}`);
+console.log(`  Sample Limit: ${argv.samples}`);
+console.log(`  Output Directory: ${argv.output}`);
 console.log('');
 
-// Now import and run the audit logic
-import('./audit-core.js').then(({ runAudit }) => {
-  runAudit(auditConfig).catch(error => {
-    console.error('❌ Audit failed:', error.message);
-    process.exit(1);
-  });
-}).catch(error => {
-  console.error('❌ Failed to load audit module:', error.message);
+// Build arguments for bigquery.js in the correct positional order
+const bigqueryArgs = [
+  argv.project,           // PROJECT_ID (argv[2])
+  argv.dataset,           // DATASET_ID (argv[3])
+  argv.filter || '',      // TABLE_FILTER (argv[4])
+  argv.location,          // LOCATION (argv[5])
+  argv.samples.toString(), // SAMPLE_LIMIT (argv[6])
+  argv.output             // OUTPUT_DIR (argv[7])
+];
+
+// Path to bigquery.js relative to this file
+const bigqueryPath = path.resolve(__dirname, '..', 'bigquery.js');
+
+// Spawn the bigquery.js process with positional arguments
+const child = spawn('node', [bigqueryPath, ...bigqueryArgs], {
+  stdio: 'inherit',
+  env: process.env
+});
+
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});
+
+child.on('error', (error) => {
+  console.error('❌ Failed to start audit:', error.message);
   process.exit(1);
 });

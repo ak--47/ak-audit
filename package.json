@@ -5,7 +5,7 @@
 	"bin": {
 		"ak-audit": "./bin/ak-audit.js"
 	},
-	"main": "./bin/audit-core.js",
+	"main": "./bigquery.js",
 	"scripts": {
 		"test": "vitest",
 		"test:run": "vitest run",
