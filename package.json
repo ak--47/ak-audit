@@ -6,6 +6,25 @@
 		"ak-audit": "./bin/ak-audit.js"
 	},
 	"main": "./bigquery.js",
+	"files": [
+		"bin/",
+		"bigquery.js",
+		"buildReport.js",
+		"rebuild.js",
+		"README.md",
+		"CLAUDE.md"
+	],
+	"engines": {
+		"node": ">=16.0.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ak-audit/ak-audit.git"
+	},
+	"bugs": {
+		"url": "https://github.com/ak-audit/ak-audit/issues"
+	},
+	"homepage": "https://github.com/ak-audit/ak-audit#readme",
 	"scripts": {
 		"test": "vitest",
 		"test:run": "vitest run",
@@ -13,9 +32,10 @@
 		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser",
 		"serve": "npx serve ./output/reports",
 		"rebuild": "node rebuild.js",
-		"rebuild:watch": "nodemon rebuild.js"
+		"rebuild:watch": "nodemon rebuild.js",
+		"prepublishOnly": "npm run test:run"
 	},
-	"keywords": ["bigquery", "audit", "data-warehouse", "analytics", "cli", "data-quality"],
+	"keywords": ["bigquery", "audit", "data-warehouse", "analytics", "cli", "data-quality", "google-cloud", "schema-analysis"],
 	"author": "ak@mixpanel.com",
 	"license": "MIT",
 	"description": "CLI tool for auditing BigQuery datasets - analyze schemas, sample data, and generate comprehensive reports",
