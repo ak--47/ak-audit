@@ -1,6 +1,9 @@
 # ak-audit
 
-A comprehensive data warehouse schema auditing tool that generates detailed reports about your BigQuery datasets. Built for humans who need to understand, document, and analyze their data warehouse structure and are unhappy with the stock web UI offering.
+A powerful CLI tool for auditing BigQuery datasets. Analyze schemas, sample data, detect join keys, and generate comprehensive reports with interactive visualizations.
+
+[![npm version](https://badge.fury.io/js/ak-audit.svg)](https://www.npmjs.com/package/ak-audit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
@@ -15,113 +18,123 @@ ak-audit is a Node.js command-line tool designed to comprehensively audit BigQue
 - 📈 **Table Analytics** - Size distributions, row counts, partition analysis
 - 💾 **Multiple Output Formats** - JSON, CSV, and HTML reports
 
+## Installation
+
+### Install globally via npm
+
+```bash
+npm install -g ak-audit
+```
+
+### Use with npx (no installation required)
+
+```bash
+npx ak-audit --project my-project --dataset my-dataset
+```
+
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# Basic audit with default settings
+ak-audit --project mixpanel-gtm-training --dataset warehouse_connectors
 
-# Basic audit (uses defaults)
-node bigquery.js
+# Short form with aliases
+ak-audit -p my-project -s my-dataset -l US -o ./results
 
-# Full audit with custom parameters
-node bigquery.js my-project my-dataset US ./output 25 "users,events,products"
-```
-
-## Installation
-
-```bash
-git clone https://github.com/yourusername/ak-audit.git
-cd ak-audit
-npm install
+# Filter specific tables with patterns
+ak-audit --project my-project --dataset my-dataset --filter "users,events_*"
 ```
 
 ## Usage
 
-### Command Syntax
+### CLI Options
 
+| Option | Alias | Default | Description |
+|--------|-------|---------|-------------|
+| `--dwh` | `-d` | `bigquery` | Data warehouse type (currently only BigQuery) |
+| `--project` | `-p` | `mixpanel-gtm-training` | BigQuery project ID |
+| `--dataset` | `-s` | `warehouse_connectors` | Dataset ID to audit |
+| `--location` | `-l` | `US` | BigQuery region/location |
+| `--filter` | `-f` | *none* | Comma-separated table names (supports globs) |
+| `--samples` | `-n` | `10` | Number of sample rows per table |
+| `--output` | `-o` | `./output` | Output directory for results |
+| `--credentials` | `-c` | *none* | Path to Google Cloud credentials JSON |
+| `--help` | `-h` | | Show help information |
+| `--version` | | | Show version number |
+
+### Authentication
+
+#### Option 1: Application Default Credentials (Recommended)
 ```bash
-node bigquery.js [PROJECT_ID] [DATASET_ID] [TABLE_FILTER] [LOCATION] [SAMPLE_LIMIT] [OUTPUT_DIR]
+gcloud auth application-default login
+ak-audit --project my-project --dataset my-dataset
 ```
 
-All parameters are optional and use sensible defaults for quick testing.
+#### Option 2: Service Account Key
+```bash
+ak-audit --project my-project --dataset my-dataset --credentials ./service-account.json
+```
 
-### Parameters
+#### Required Permissions
 
-| Parameter | Position | Default | Description | Examples |
-|-----------|----------|---------|-------------|----------|
-| `PROJECT_ID` | 1 | `mixpanel-gtm-training` | Your Google Cloud project ID containing the BigQuery dataset | `my-company-prod`, `analytics-dev-123` |
-| `DATASET_ID` | 2 | `warehouse_connectors` | The specific BigQuery dataset to audit within the project | `production_data`, `staging_warehouse`, `user_analytics` |
-| `TABLE_FILTER` | 3 | `null` (all tables) | Comma-separated list of table names/patterns to audit (supports glob patterns) | `"users,events"`, `"frontend-*"`, `"*_temp,staging_*"` |
-| `LOCATION` | 4 | `US` | BigQuery region where your dataset is located (affects query performance and costs) | `US`, `EU`, `us-central1`, `europe-west1` |
-| `SAMPLE_LIMIT` | 5 | `10` | Maximum number of sample data rows to extract from each table | `5`, `25`, `100` (higher values = longer runtime) |
-| `OUTPUT_DIR` | 6 | `./output` | Local directory where all audit reports and files will be saved | `./reports`, `~/audit-results`, `/tmp/bq-audit` |
+For **full functionality** (jobUser mode):
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="user:your-email@company.com" \
+  --role="roles/bigquery.jobUser"
+```
 
-**Parameter Notes:**
-- **PROJECT_ID**: Must have BigQuery enabled and proper IAM permissions configured
-- **TABLE_FILTER**: Leave empty to audit all tables, or specify patterns to focus on specific table groups - now positioned early for convenient filtering
-- **LOCATION**: Should match your dataset's location for optimal performance and to avoid cross-region charges
-- **SAMPLE_LIMIT**: Larger values provide more comprehensive data samples but increase processing time and BigQuery costs
-- **OUTPUT_DIR**: Positioned last as it's rarely changed from the default
+For **read-only mode** (dataViewer mode):
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="user:your-email@company.com" \
+  --role="roles/bigquery.dataViewer"
+```
 
 ### Examples
 
 ```bash
-# Basic usage - audit all tables with defaults
-node bigquery.js
+# Basic audit with defaults
+ak-audit --project my-project --dataset my-dataset
 
-# Specify your own project and dataset
-node bigquery.js my-company-prod analytics_warehouse
+# Short form with aliases
+ak-audit -p my-project -s my-dataset -l US -o ./results
 
-# Focus on specific tables with exact names
-node bigquery.js my-project my-dataset "users,events,products"
+# Filter specific tables with glob patterns
+ak-audit --project my-project --dataset my-dataset --filter "users,events*,orders"
 
-# Audit tables matching patterns
-node bigquery.js my-project my-dataset "frontend-*"
-node bigquery.js my-project my-dataset "backend-*,api_*" 
-node bigquery.js my-project my-dataset "*_events,*_users"
+# Use custom credentials file
+ak-audit --project my-project --dataset my-dataset --credentials ./service-account.json
 
-# EU dataset with custom location
-node bigquery.js eu-project-123 user_data "" EU
+# Increase sample size for detailed analysis
+ak-audit --project my-project --dataset my-dataset --samples 50
 
-# Production audit with more sample data
-node bigquery.js prod-analytics warehouse "" US 50
-
-# Development workflow - quick audit of staging tables with minimal samples
-node bigquery.js dev-project staging_db "staging_*" US 5
-
-# Mix exact names and patterns for comprehensive audit with custom output
-node bigquery.js my-project my-dataset "core_users,frontend-*,temp_?,*_archive" US 15 ./custom-reports
-
-# Multi-region setup example with custom output directory
-node bigquery.js global-project emea_data "" europe-west1 20 ./emea-reports
-
-# Clean output directory before new audit
-npm run prune
+# EU region with custom output
+ak-audit --project eu-project --dataset analytics --location EU --output ./eu-audit
 ```
 
 **Real-world Usage Patterns:**
 
 ```bash
 # Data team daily review - focus on summary tables
-node bigquery.js analytics-prod warehouse "*_daily,*_summary"
+ak-audit --project analytics-prod --dataset warehouse --filter "*_daily,*_summary"
 
 # Schema migration planning with detailed samples
-node bigquery.js staging-project new_schema "" US 25 ./migration-audit
+ak-audit --project staging-project --dataset new_schema --samples 25 --output ./migration-audit
 
 # Compliance audit - focus on user data tables with minimal samples
-node bigquery.js compliance-db pii_data "*users*,*profiles*,*customer*" US 5 ./compliance-reports
+ak-audit --project compliance-db --dataset pii_data --filter "*users*,*profiles*,*customer*" --samples 5
 
 # Performance analysis - large tables only with extensive sampling
-node bigquery.js perf-project analytics "events_*,logs_*" US 100 ./perf-audit
+ak-audit --project perf-project --dataset analytics --filter "events_*,logs_*" --samples 100
 
 # Quick schema check - no samples needed
-node bigquery.js my-project my-dataset "new_*" US 0 ./schema-check
+ak-audit --project my-project --dataset my-dataset --filter "new_*" --samples 0
 ```
 
 ### Table Filtering with Glob Patterns
 
-The `TABLE_FILTER` parameter supports glob patterns for flexible table selection:
+The `--filter` option supports glob patterns for flexible table selection:
 
 - **`*`** - Matches any number of characters
 - **`?`** - Matches a single character  

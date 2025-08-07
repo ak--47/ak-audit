@@ -776,7 +776,18 @@ function generateHtmlReport(data) {
                 const headerRow = thead.insertRow();
                 headers.forEach(h => {
                     const th = document.createElement('th');
-                    th.textContent = h.replace(/_/g, ' ');
+                    
+                    // Custom header mappings for better display names
+                    let displayName = h;
+                    if (h === 'nested_field_path') {
+                        displayName = 'field path';
+                    } else if (h === 'nested_type') {
+                        displayName = 'type';
+                    } else {
+                        displayName = h.replace(/_/g, ' ');
+                    }
+                    
+                    th.textContent = displayName;
                     headerRow.appendChild(th);
                 });
                 rows.forEach(rowData => {

@@ -200,8 +200,17 @@ describe('BigQuery Audit Integration Tests', () => {
 // Helper function to run the audit script as a child process
 function runAuditScript(args) {
   return new Promise((resolve) => {
-    const filteredArgs = args.filter(arg => arg !== null);
-    const child = spawn('node', ['bigquery.js', ...filteredArgs], {
+    // Convert args to CLI flags
+    const cliArgs = [];
+    if (args[0]) cliArgs.push('--project', args[0]);
+    if (args[1]) cliArgs.push('--dataset', args[1]); 
+    if (args[2]) cliArgs.push('--location', args[2]);
+    if (args[3]) cliArgs.push('--output', args[3]);
+    if (args[4]) cliArgs.push('--samples', args[4]);
+    if (args[5]) cliArgs.push('--filter', args[5]);
+    if (args[6]) cliArgs.push('--force-mode', args[6]);
+    
+    const child = spawn('node', ['./bin/ak-audit.js', ...cliArgs], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: process.cwd()
     });

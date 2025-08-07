@@ -539,7 +539,7 @@ async function testBigQueryAuth() {
 				dryRun: true
 			});
 			console.log(`${colors.green}✓ Query permissions available (jobUser role detected).${colors.nc}\n`);
-			return "dataViewer"
+			return "dataViewer";
 			// return "jobUser";
 		} catch (queryError) {
 			console.log(`${colors.yellow}⚠ Query permissions not available - will use REST API only (dataViewer mode).${colors.nc}\n`);
@@ -1505,6 +1505,8 @@ async function runAudit() {
 			analytics: analyticsInsights,
 			summary: { ...auditSummary, total_objects: tables.length }
 		};
+
+		console.log(`\n${colors.green}✓ Final JSON structure ready with ${finalJson.tables.length} tables.${colors.nc}`);
 		await fs.writeFile(path.join(config.outputDir, "reports", "dataset_audit.json"), JSON.stringify(finalJson, null, 2));
 
 		// Finalize audit summary CSV
@@ -1551,72 +1553,77 @@ async function runAudit() {
 // --- New Function for Advanced Data Quality ---
 // todo: implement this in the main flow
 async function getAdvancedDataQualityMetrics(projectId, datasetId, tableName, schema) {
-    if (!schema || schema.length === 0) return {};
+	if (!schema || schema.length === 0) return {};
 
-    // Select non-nested, non-repeated columns for analysis
-    const columnsToAnalyze = schema
-        .filter(field => !field.nested_field_path.includes('.') && field.nested_type !== 'STRUCT' && field.nested_type !== 'RECORD' && !field.nested_type.startsWith('ARRAY'))
-        .map(field => field.column_name);
+	// Select non-nested, non-repeated columns for analysis
+	const columnsToAnalyze = schema
+		.filter(field => !field.nested_field_path.includes('.') && field.nested_type !== 'STRUCT' && field.nested_type !== 'RECORD' && !field.nested_type.startsWith('ARRAY'))
+		.map(field => field.column_name);
 
-    if (columnsToAnalyze.length === 0) return {};
+	if (columnsToAnalyze.length === 0) return {};
 
-    const qualityMetrics = {};
+	const qualityMetrics = {};
 
-    // Build a single query to get all metrics at once for efficiency
-    const subqueries = columnsToAnalyze.map(col => `APPROX_COUNT_DISTINCT(\`${col}\`) AS ${col}_distinct_count`);
-    const query = `SELECT ${subqueries.join(', ')} FROM \`${projectId}.${datasetId}.${tableName}\``;
+	// Build a single query to get all metrics at once for efficiency
+	const subqueries = columnsToAnalyze.map(col => `APPROX_COUNT_DISTINCT(\`${col}\`) AS ${col}_distinct_count`);
+	const query = `SELECT ${subqueries.join(', ')} FROM \`${projectId}.${datasetId}.${tableName}\``;
 
-    try {
-        const [results] = await bigquery.query({ query, location: config.location });
-        if (results.length > 0) {
-            const counts = results[0];
-            for (const col of columnsToAnalyze) {
-                qualityMetrics[col] = {
-                    approx_distinct_count: counts[`${col}_distinct_count`]
-                };
-            }
-        }
-        return qualityMetrics;
-    } catch (e) {
-        console.log(`${colors.yellow}  └ ⚠ Could not run advanced data quality query for '${tableName}'. ${e.message}${colors.nc}`);
-        return {}; // Return empty object on failure
-    }
+	try {
+		const [results] = await bigquery.query({ query, location: config.location });
+		if (results.length > 0) {
+			const counts = results[0];
+			for (const col of columnsToAnalyze) {
+				qualityMetrics[col] = {
+					approx_distinct_count: counts[`${col}_distinct_count`]
+				};
+			}
+		}
+		return qualityMetrics;
+	} catch (e) {
+		console.log(`${colors.yellow}  └ ⚠ Could not run advanced data quality query for '${tableName}'. ${e.message}${colors.nc}`);
+		return {}; // Return empty object on failure
+	}
 }
 
 
 async function getSecurityPolicies(projectId, datasetId, tableName) {
-    const policies = {
-        row_access_policies: [],
-        data_masking_policies: []
-    };
+	const policies = {
+		row_access_policies: [],
+		data_masking_policies: []
+	};
 
-    try {
-        // Query for Row Access Policies
-        const rlsQuery = `
+	try {
+		// Query for Row Access Policies
+		const rlsQuery = `
             SELECT policy_name, filter_expression 
             FROM \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.ROW_ACCESS_POLICIES\`
             WHERE table_name = '${tableName}' AND table_schema = '${datasetId}'`;
-        const [rlsResults] = await bigquery.query({ query: rlsQuery, location: config.location });
-        policies.row_access_policies = rlsResults;
+		const [rlsResults] = await bigquery.query({ query: rlsQuery, location: config.location });
+		policies.row_access_policies = rlsResults;
 
-        // Query for Data Masking on columns of this table
-        const maskingQuery = `
+		// Query for Data Masking on columns of this table
+		const maskingQuery = `
             SELECT c.column_name, c.rounding_mode, c.masking_expression
             FROM \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
             JOIN \`${projectId}.${formatRegion(config.location)}.INFORMATION_SCHEMA.COLUMNS\` c
                 ON cfp.table_name = c.table_name AND cfp.table_schema = c.table_schema AND cfp.column_name = c.column_name
             WHERE c.table_name = '${tableName}' AND c.table_schema = '${datasetId}' AND c.masking_expression IS NOT NULL`;
-        const [maskingResults] = await bigquery.query({ query: maskingQuery, location: config.location });
-        policies.data_masking_policies = maskingResults;
-        
-        return policies;
-    } catch (e) {
-        console.log(`${colors.yellow}  └ ⚠ Could not fetch security policies for '${tableName}'. ${e.message}${colors.nc}`);
-        return policies;
-    }
+		const [maskingResults] = await bigquery.query({ query: maskingQuery, location: config.location });
+		policies.data_masking_policies = maskingResults;
+
+		return policies;
+	} catch (e) {
+		console.log(`${colors.yellow}  └ ⚠ Could not fetch security policies for '${tableName}'. ${e.message}${colors.nc}`);
+		return policies;
+	}
 }
 
 if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-	runAudit();
+	runAudit().then(() => {
+		process.exit(0);
+	}).catch(error => {
+		console.error(`${colors.red}❌ Audit failed: ${error.message}${colors.nc}`);
+		process.exit(1);
+	});
 }
 
