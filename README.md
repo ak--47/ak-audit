@@ -1,13 +1,13 @@
-# ak-audit
+# dwh-audit
 
 A powerful CLI tool for auditing BigQuery datasets. Analyze schemas, sample data, detect join keys, and generate comprehensive reports with interactive visualizations.
 
-[![npm version](https://badge.fury.io/js/ak-audit.svg)](https://www.npmjs.com/package/ak-audit)
+[![npm version](https://badge.fury.io/js/dwh-audit.svg)](https://www.npmjs.com/package/dwh-audit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-ak-audit is a Node.js command-line tool designed to comprehensively audit BigQuery datasets. It analyzes table schemas, retrieves sample data, identifies potential join keys, and generates interactive HTML reports with data lineage visualization.
+dwh-audit is a Node.js command-line tool designed to comprehensively audit BigQuery datasets. It analyzes table schemas, retrieves sample data, identifies potential join keys, and generates interactive HTML reports with data lineage visualization.
 
 **Key Features:**
 - 🔍 **Complete Schema Analysis** - Nested fields, data types, partitioning, clustering
@@ -23,26 +23,26 @@ ak-audit is a Node.js command-line tool designed to comprehensively audit BigQue
 ### Install globally via npm
 
 ```bash
-npm install -g ak-audit
+npm install -g dwh-audit
 ```
 
 ### Use with npx (no installation required)
 
 ```bash
-npx ak-audit --project my-project --dataset my-dataset
+npx dwh-audit --project my-project --dataset my-dataset
 ```
 
 ## Quick Start
 
 ```bash
 # Basic audit with default settings
-ak-audit --project mixpanel-gtm-training --dataset warehouse_connectors
+dwh-audit --project mixpanel-gtm-training --dataset warehouse_connectors
 
 # Short form with aliases
-ak-audit -p my-project -s my-dataset -l US -o ./results
+dwh-audit -p my-project -s my-dataset -l US -o ./results
 
 # Filter specific tables with patterns
-ak-audit --project my-project --dataset my-dataset --filter "users,events_*"
+dwh-audit --project my-project --dataset my-dataset --filter "users,events_*"
 ```
 
 ## Usage
@@ -67,12 +67,12 @@ ak-audit --project my-project --dataset my-dataset --filter "users,events_*"
 #### Option 1: Application Default Credentials (Recommended)
 ```bash
 gcloud auth application-default login
-ak-audit --project my-project --dataset my-dataset
+dwh-audit --project my-project --dataset my-dataset
 ```
 
 #### Option 2: Service Account Key
 ```bash
-ak-audit --project my-project --dataset my-dataset --credentials ./service-account.json
+dwh-audit --project my-project --dataset my-dataset --credentials ./service-account.json
 ```
 
 #### Required Permissions
@@ -95,41 +95,41 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
 
 ```bash
 # Basic audit with defaults
-ak-audit --project my-project --dataset my-dataset
+dwh-audit --project my-project --dataset my-dataset
 
 # Short form with aliases
-ak-audit -p my-project -s my-dataset -l US -o ./results
+dwh-audit -p my-project -s my-dataset -l US -o ./results
 
 # Filter specific tables with glob patterns
-ak-audit --project my-project --dataset my-dataset --filter "users,events*,orders"
+dwh-audit --project my-project --dataset my-dataset --filter "users,events*,orders"
 
 # Use custom credentials file
-ak-audit --project my-project --dataset my-dataset --credentials ./service-account.json
+dwh-audit --project my-project --dataset my-dataset --credentials ./service-account.json
 
 # Increase sample size for detailed analysis
-ak-audit --project my-project --dataset my-dataset --samples 50
+dwh-audit --project my-project --dataset my-dataset --samples 50
 
 # EU region with custom output
-ak-audit --project eu-project --dataset analytics --location EU --output ./eu-audit
+dwh-audit --project eu-project --dataset analytics --location EU --output ./eu-audit
 ```
 
 **Real-world Usage Patterns:**
 
 ```bash
 # Data team daily review - focus on summary tables
-ak-audit --project analytics-prod --dataset warehouse --filter "*_daily,*_summary"
+dwh-audit --project analytics-prod --dataset warehouse --filter "*_daily,*_summary"
 
 # Schema migration planning with detailed samples
-ak-audit --project staging-project --dataset new_schema --samples 25 --output ./migration-audit
+dwh-audit --project staging-project --dataset new_schema --samples 25 --output ./migration-audit
 
 # Compliance audit - focus on user data tables with minimal samples
-ak-audit --project compliance-db --dataset pii_data --filter "*users*,*profiles*,*customer*" --samples 5
+dwh-audit --project compliance-db --dataset pii_data --filter "*users*,*profiles*,*customer*" --samples 5
 
 # Performance analysis - large tables only with extensive sampling
-ak-audit --project perf-project --dataset analytics --filter "events_*,logs_*" --samples 100
+dwh-audit --project perf-project --dataset analytics --filter "events_*,logs_*" --samples 100
 
 # Quick schema check - no samples needed
-ak-audit --project my-project --dataset my-dataset --filter "new_*" --samples 0
+dwh-audit --project my-project --dataset my-dataset --filter "new_*" --samples 0
 ```
 
 ### Table Filtering with Glob Patterns
@@ -151,7 +151,7 @@ The `--filter` option supports glob patterns for flexible table selection:
 
 ## Permission Modes
 
-ak-audit automatically detects your BigQuery permissions and adapts its functionality accordingly.
+dwh-audit automatically detects your BigQuery permissions and adapts its functionality accordingly.
 
 ### 🔍 DataViewer Mode
 **IAM Role:** `roles/bigquery.dataViewer`
@@ -197,7 +197,7 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT \\
 
 ## Output Structure
 
-ak-audit creates a comprehensive directory structure with multiple report formats:
+dwh-audit creates a comprehensive directory structure with multiple report formats:
 
 ```
 output/                          # OUTPUT_DIR parameter (default: ./output)
@@ -266,7 +266,7 @@ The HTML report includes:
 
 ### 🔗 Smart Join Key Detection
 
-ak-audit intelligently identifies potential join keys by:
+dwh-audit intelligently identifies potential join keys by:
 
 - ✅ **Cross-table analysis** - Fields appearing in multiple tables
 - ✅ **Data type filtering** - Only STRING/INT types considered
@@ -282,7 +282,7 @@ _partitiontime, _partitiondate
 
 ### 🎯 Partition-Aware Sampling
 
-For JobUser mode, ak-audit optimizes sample data collection:
+For JobUser mode, dwh-audit optimizes sample data collection:
 
 - **Partitioned Tables:** Queries recent partitions instead of full table scans
 - **Large Tables (1M+ rows):** Uses `TABLESAMPLE` for efficiency  
@@ -305,7 +305,7 @@ For JobUser mode, ak-audit optimizes sample data collection:
 
 ## Authentication
 
-ak-audit uses Google Cloud SDK authentication:
+dwh-audit uses Google Cloud SDK authentication:
 
 ```bash
 # Login with your user account

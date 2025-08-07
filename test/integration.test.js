@@ -210,7 +210,7 @@ function runAuditScript(args) {
     if (args[5]) cliArgs.push('--filter', args[5]);
     if (args[6]) cliArgs.push('--force-mode', args[6]);
     
-    const child = spawn('node', ['./bin/ak-audit.js', ...cliArgs], {
+    const child = spawn('node', ['./bin/dwh-audit.js', ...cliArgs], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: process.cwd()
     });

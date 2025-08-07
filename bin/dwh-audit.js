@@ -98,7 +98,7 @@ function validateLocation(location) {
 
 // --- CLI Configuration ---
 const argv = yargs(hideBin(process.argv))
-  .scriptName('ak-audit')
+  .scriptName('dwh-audit')
   .usage('$0 [options]')
   .option('dwh', {
     alias: 'd',
@@ -149,9 +149,9 @@ const argv = yargs(hideBin(process.argv))
   })
   .help('h')
   .alias('h', 'help')
-  .example('$0 --project my-project --dataset my-dataset', 'Audit a specific project and dataset')
-  .example('$0 --filter "users,events*" --samples 25', 'Audit only specific tables with more samples')
-  .example('$0 --credentials ./service-account.json', 'Use specific credentials file')
+  .example('$0 --project my-project --dataset my-dataset', 'Basic audit of a dataset')
+  .example('$0 --project my-project --dataset my-dataset --filter "users,events*" --samples 25', 'Audit specific tables with more samples')
+  .example('$0 --project my-project --dataset my-dataset --credentials ./service-account.json', 'Use specific credentials file')
   .version('1.0.0')
   .wrap(120)
   .argv;
@@ -236,7 +236,7 @@ main().then(async (validated) => {
     await fs.access(bigqueryPath);
   } catch (error) {
     console.error(`${colors.red}❌ Internal Error: Could not find audit engine at ${bigqueryPath}${colors.nc}`);
-    console.error(`${colors.yellow}💡 This may indicate a corrupted installation. Try reinstalling ak-audit.${colors.nc}`);
+    console.error(`${colors.yellow}💡 This may indicate a corrupted installation. Try reinstalling dwh-audit.${colors.nc}`);
     process.exit(1);
   }
 
