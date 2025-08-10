@@ -12,188 +12,457 @@ function generateHtmlReport(data) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BigQuery Dataset Audit Report</title>
+    <title>Data Warehouse Audit Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <style>
         :root {
-            --primary: #7856FF;
-            --lava-150: #CC332B;
-            --lava-100: #FF7557;
-            --mint-150: #07B096;
-            --mint-100: #80E1D9;
-            --mint-40: #BCF0F0;
-            --mint-20: #E0FAFA;
-            --mustard-100: #F8BC3B;
-            --bg-dark: #0a101a;
-            --bg-medium: #121A26;
-            --bg-light: #1A2433;
-            --text-primary: var(--mint-20);
-            --text-secondary: #a3b3cc;
-            --border-color: #2c3a54;
-            --accent: var(--primary);
-            --accent-glow: rgba(120, 86, 255, 0.2);
-            --error: var(--lava-100);
-            --error-glow: rgba(255, 117, 87, 0.15);
+            /* Mixpanel-inspired Dark Mode Colors */
+            --bg-primary: #0D1116;
+            --bg-secondary: #161B22;
+            --bg-tertiary: #21262D;
+            --bg-card: #161B22;
+            --bg-elevated: #1C2128;
+            
+            --text-primary: #F0F6FC;
+            --text-secondary: #8B949E;
+            --text-muted: #6E7681;
+            --text-accent: #FFFFFF;
+            
+            --border-primary: #30363D;
+            --border-secondary: #21262D;
+            --border-focus: #8B5CF6;
+            
+            /* Mixpanel Core Purple */
+            --accent-purple: #8B5CF6;
+            --accent-purple-hover: #7C3AED;
+            --accent-purple-light: #A78BFA;
+            --accent-purple-dark: #6D28D9;
+            
+            /* Mixpanel Brand Colors */
+            --mixpanel-purple: #7856FF;
+            --mixpanel-purple-light: #9B7EFF;
+            --mixpanel-purple-dark: #5B3FD6;
+            
+            /* Status Colors */
+            --success: #238636;
+            --success-light: #2DA44E;
+            --warning: #D1742F;
+            --warning-light: #F85149;
+            --error: #DA3633;
+            --error-light: #FF6B6B;
+            
+            /* Chart Colors - Mixpanel Inspired */
+            --chart-color-1: #8B5CF6;
+            --chart-color-2: #06B6D4;
+            --chart-color-3: #10B981;
+            --chart-color-4: #F59E0B;
+            --chart-color-5: #EF4444;
+            --chart-color-6: #8B5A2B;
+            --chart-color-7: #EC4899;
+            --chart-color-8: #84CC16;
+            
+            /* Effects */
+            --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+            --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.6);
+            --glow-purple: 0 0 0 3px rgba(139, 92, 246, 0.1);
+            
+            --font-mono: 'SF Mono', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            --font-sans: "Apercu Pro", "Helvetica Neue", Helvetica, Tahoma, Geneva, Arial, sans-serif;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: "Inter", sans-serif;
-            background-color: var(--bg-dark);
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
             color: var(--text-primary);
-            line-height: 1.6;
+            line-height: 1.5;
+            min-height: 100vh;
         }
-        .container { max-width: 1400px; margin: 0 auto; padding: 40px 20px; }
-        header { text-align: center; margin-bottom: 40px; }
+        
+        /* Header Styles */
+        .container { max-width: 1440px; margin: 0 auto; padding: 32px 24px; }
+        header { 
+            text-align: center; 
+            margin-bottom: 48px;
+            padding: 40px 0;
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+            border-radius: 16px;
+            border: 1px solid var(--border-primary);
+            box-shadow: var(--shadow-card);
+        }
         h1 {
-            font-size: 2.8rem;
+            font-size: 3rem;
             font-weight: 700;
-            background: linear-gradient(90deg, var(--accent), var(--mint-100));
+            background: linear-gradient(135deg, var(--mixpanel-purple), var(--accent-purple-light));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 8px;
+            background-clip: text;
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
         }
-        .subtitle { color: var(--text-secondary); font-size: 1.1rem; }
-        .subtitle code { background: var(--bg-light); padding: 2px 6px; border-radius: 4px; font-weight: 600; color: var(--mint-100); }
+        .subtitle { 
+            color: var(--text-secondary); 
+            font-size: 1.125rem; 
+            font-weight: 400;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .subtitle code { 
+            background: var(--bg-tertiary); 
+            padding: 4px 8px; 
+            border-radius: 6px; 
+            font-weight: 500; 
+            color: var(--accent-purple-light);
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            border: 1px solid var(--border-secondary);
+        }
+        /* Summary Cards */
         .summary-cards {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 40px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+        @media (max-width: 1200px) {
+            .summary-cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media (max-width: 600px) {
+            .summary-cards {
+                grid-template-columns: 1fr;
+            }
         }
         .card {
-            background: var(--bg-medium);
-            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
             border-radius: 12px;
-            padding: 25px;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            padding: 32px 24px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
         }
-        .card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--mixpanel-purple), var(--accent-purple-light));
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .card:hover { 
+            transform: translateY(-2px); 
+            box-shadow: var(--shadow); 
+            border-color: var(--border-focus);
+        }
+        .card:hover::before { opacity: 1; }
         .card h3 {
             color: var(--text-secondary);
-            font-size: 0.9rem;
-            font-weight: 500;
+            font-size: 0.875rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 10px;
+            letter-spacing: 0.05em;
+            margin-bottom: 16px;
         }
-        .card .number { font-size: 2rem; font-weight: 700; color: var(--text-primary); }
-        .card.error .number { color: var(--error); }
-        .search-box { margin-bottom: 25px; display: flex; gap: 15px; align-items: center; }
+        .card .number { 
+            font-size: 2.5rem; 
+            font-weight: 700; 
+            color: var(--text-primary);
+            line-height: 1;
+            margin-bottom: 8px;
+        }
+        .card.error .number { color: var(--error-light); }
+        .card.error::before { background: linear-gradient(90deg, var(--error), var(--error-light)); }
+        /* Search and Controls */
+        .search-box { 
+            margin-bottom: 32px; 
+            display: flex; 
+            gap: 16px; 
+            align-items: center;
+            flex-wrap: wrap;
+        }
         .search-box input {
             flex: 1;
-            padding: 16px;
+            min-width: 320px;
+            padding: 16px 20px;
             font-size: 1rem;
-            background: var(--bg-medium);
-            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             color: var(--text-primary);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            transition: all 0.2s ease;
+            font-family: var(--font-sans);
+        }
+        .search-box input::placeholder {
+            color: var(--text-muted);
         }
         .search-box input:focus {
             outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-glow);
+            border-color: var(--border-focus);
+            box-shadow: var(--glow-purple);
+            background: var(--bg-elevated);
         }
         .expand-collapse-btn {
-            padding: 12px 20px;
-            background: var(--accent);
-            color: white;
+            padding: 14px 24px;
+            background: var(--mixpanel-purple);
+            color: var(--text-accent);
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            transition: background 0.2s ease;
+            font-family: var(--font-sans);
+            transition: all 0.2s ease;
             white-space: nowrap;
         }
-        .expand-collapse-btn:hover {
-            background: rgba(120, 86, 255, 0.8);
+        .expand-collapse-btn:hover { 
+            background: var(--mixpanel-purple-dark); 
+            transform: translateY(-1px);
         }
+        .expand-collapse-btn:active { 
+            transform: translateY(0); 
+        }
+        /* Table Items */
         .table-item {
-            background: var(--bg-medium);
-            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
             border-radius: 12px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             overflow: hidden;
-            transition: background-color 0.2s ease;
+            transition: all 0.2s ease;
+            box-shadow: var(--shadow-card);
         }
-        .table-header { padding: 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .table-header:hover { background-color: var(--bg-light); }
-        .table-name { font-size: 1.2rem; font-weight: 600; color: var(--accent); display: flex; align-items: center; }
-        .expand-icon { transition: transform 0.2s ease; margin-right: 12px; }
+        .table-item:hover {
+            border-color: var(--border-focus);
+            box-shadow: var(--shadow-sm);
+        }
+        .table-header { 
+            padding: 24px; 
+            cursor: pointer; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            border-bottom: 1px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .table-header:hover { 
+            background: var(--bg-elevated);
+        }
+        .table-item.expanded .table-header {
+            border-bottom-color: var(--border-secondary);
+        }
+        .table-name { 
+            font-size: 1.25rem; 
+            font-weight: 600; 
+            color: var(--mixpanel-purple-light); 
+            display: flex; 
+            align-items: center;
+            font-family: var(--font-mono);
+        }
+        .expand-icon { 
+            transition: transform 0.2s ease; 
+            margin-right: 16px; 
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
         .table-item.expanded .expand-icon { transform: rotate(90deg); }
-        .badges { display: flex; gap: 10px; }
+        /* Badges */
+        .badges { display: flex; gap: 12px; flex-wrap: wrap; }
         .badge {
-            padding: 5px 12px;
-            border-radius: 16px;
-            font-size: 0.8rem;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
             font-weight: 600;
             text-transform: uppercase;
+            letter-spacing: 0.025em;
+            border: 1px solid transparent;
         }
-        .badge.table { background-color: rgba(120, 86, 255, 0.15); color: var(--accent); }
-        .badge.view { background-color: rgba(7, 176, 150, 0.15); color: var(--mint-150); }
-        .badge.error { background-color: var(--error-glow); color: var(--error); }
-        .details { display: none; padding: 0 20px 20px; border-top: 1px solid var(--border-color); }
+        .badge.table { 
+            background: rgba(139, 92, 246, 0.15); 
+            color: var(--accent-purple-light);
+            border-color: rgba(139, 92, 246, 0.25);
+        }
+        .badge.view { 
+            background: rgba(16, 185, 129, 0.15); 
+            color: var(--chart-color-3);
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+        .badge.error { 
+            background: rgba(239, 68, 68, 0.15); 
+            color: var(--error-light);
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+        /* Table Details */
+        .details { 
+            display: none; 
+            padding: 24px; 
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-secondary); 
+        }
         .table-item.expanded .details { display: block; }
-        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-        .detail-item strong { display: block; color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 2px; text-transform: uppercase; }
-        .detail-item span { font-weight: 500; }
-        h4 { color: var(--mint-100); font-weight: 600; margin: 20px 0 10px; }
+        .details-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 24px; 
+            margin-bottom: 24px; 
+        }
+        .detail-item strong { 
+            display: block; 
+            color: var(--text-secondary); 
+            font-size: 0.75rem; 
+            margin-bottom: 6px; 
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+        .detail-item span { 
+            font-weight: 500; 
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        h4 { 
+            color: var(--accent-purple-light); 
+            font-weight: 600; 
+            margin: 24px 0 16px;
+            font-size: 1.1rem;
+        }
+        /* Tables and Code */
         pre, table {
-            background: var(--bg-dark);
-            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
-            padding: 15px;
-            font-size: 0.85rem;
+            padding: 16px;
+            font-size: 0.875rem;
             color: var(--text-secondary);
             max-height: 400px;
             overflow: auto;
-            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-family: var(--font-mono);
         }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        th { color: var(--text-primary); font-weight: 600; }
-        tr:hover { background-color: var(--bg-light); color: var(--text-primary); }
-        tr:hover td { color: var(--text-primary); }
-        .error-message { background: var(--error-glow); border: 1px solid var(--error); color: var(--error); padding: 10px; border-radius: 8px; margin-top: 10px; font-family: monospace; }
-        .join-key-row { background-color: rgba(120, 86, 255, 0.1); }
-        .join-key-cell { color: var(--accent); font-weight: 600; }
-        .complex-field-row { background-color: rgba(255, 117, 87, 0.08); border-left: 3px solid var(--lava-100); }
-        .complex-field-cell { color: var(--lava-100); font-weight: 600; }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            padding: 0;
+        }
+        th, td { 
+            padding: 12px 16px; 
+            text-align: left; 
+            border-bottom: 1px solid var(--border-secondary); 
+            font-size: 0.875rem;
+        }
+        th { 
+            color: var(--text-primary); 
+            font-weight: 600; 
+            background: var(--bg-secondary);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        tr:hover { 
+            background: var(--bg-elevated); 
+        }
+        tr:hover td { 
+            color: var(--text-primary); 
+        }
+        /* Special States */
+        .error-message { 
+            background: rgba(239, 68, 68, 0.1); 
+            border: 1px solid var(--error-light); 
+            color: var(--error-light); 
+            padding: 12px; 
+            border-radius: 8px; 
+            margin-top: 16px; 
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+        }
+        .join-key-row { 
+            background: rgba(139, 92, 246, 0.08);
+            border-left: 3px solid var(--accent-purple);
+        }
+        .join-key-cell { 
+            color: var(--accent-purple-light); 
+            font-weight: 600; 
+        }
+        .complex-field-row { 
+            background: rgba(245, 158, 11, 0.08); 
+            border-left: 3px solid var(--chart-color-4);
+        }
+        .complex-field-cell { 
+            color: var(--chart-color-4); 
+            font-weight: 600; 
+        }
         .nested-field-indicator { 
             display: inline-block; 
-            margin-left: 5px; 
-            padding: 2px 6px; 
-            background: rgba(255, 117, 87, 0.15); 
-            color: var(--lava-100); 
+            margin-left: 8px; 
+            padding: 3px 8px; 
+            background: rgba(245, 158, 11, 0.15); 
+            color: var(--chart-color-4); 
             font-size: 0.7rem; 
-            border-radius: 3px; 
+            border-radius: 4px; 
             font-weight: 600;
+            border: 1px solid rgba(245, 158, 11, 0.25);
         }
-        .sample-json { background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.85rem; color: var(--text-secondary); max-height: 400px; overflow: auto; white-space: pre-wrap; }
-        .sample-section { margin-top: 20px; }
-        .sample-toggle { color: var(--mint-100); font-weight: 600; margin: 20px 0 10px; transition: color 0.2s ease; }
+        /* Sample Data */
+        .sample-json { 
+            background: var(--bg-primary); 
+            border: 1px solid var(--border-primary); 
+            border-radius: 8px; 
+            padding: 16px; 
+            font-family: var(--font-mono); 
+            font-size: 0.875rem; 
+            color: var(--text-secondary); 
+            max-height: 400px; 
+            overflow: auto; 
+            white-space: pre-wrap; 
+        }
+        .sample-section { margin-top: 24px; }
+        .sample-toggle { 
+            color: var(--accent-purple-light); 
+            font-weight: 600; 
+            margin: 24px 0 12px; 
+            transition: color 0.2s ease;
+            cursor: pointer;
+        }
         .sample-toggle:hover { color: var(--text-primary); }
-        .sample-expand-icon { color: var(--mint-100); }
-        .analytics-section { margin-bottom: 40px; }
+        .sample-expand-icon { color: var(--accent-purple-light); }
+        
+        /* Charts */
+        .analytics-section { margin-bottom: 48px; }
         .charts-grid { 
             display: grid; 
-            grid-template-columns: 1fr 1fr; 
-            gap: 20px; 
-            margin-bottom: 30px; 
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); 
+            gap: 24px; 
+            margin-bottom: 32px; 
         }
         .chart-container.full-width {
             grid-column: 1 / -1;
         }
         .chart-container { 
-            background: var(--bg-medium); 
-            border: 1px solid var(--border-color); 
+            background: var(--bg-card); 
+            border: 1px solid var(--border-primary); 
             border-radius: 12px; 
-            padding: 20px; 
+            padding: 24px; 
             position: relative;
             max-height: 600px;
             overflow-y: auto;
             overflow-x: hidden;
+            box-shadow: var(--shadow-card);
+            transition: all 0.2s ease;
+        }
+        .chart-container:hover {
+            border-color: var(--border-focus);
+            box-shadow: var(--shadow-sm);
+        }
+        .chart-container h3 {
+            color: var(--text-primary);
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-secondary);
         }
         .d3-chart {
             width: 100%;
@@ -218,14 +487,14 @@ function generateHtmlReport(data) {
             font-weight: 500;
         }
         .d3-grid-line {
-            stroke: rgba(44, 58, 84, 0.3);
+            stroke: rgba(48, 54, 61, 0.3);
             stroke-width: 1;
         }
         .d3-tooltip {
             position: absolute;
-            background: rgba(26, 36, 51, 0.95);
+            background: rgba(33, 38, 45, 0.95);
             color: var(--text-primary);
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             padding: 8px 12px;
             font-size: 12px;
@@ -256,8 +525,8 @@ function generateHtmlReport(data) {
         }
         .lineage-section { margin-bottom: 40px; }
         .lineage-container {
-            background: var(--bg-medium);
-            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
             border-radius: 12px;
             padding: 20px;
             min-height: 500px;
@@ -271,7 +540,7 @@ function generateHtmlReport(data) {
         }
         .lineage-controls button {
             padding: 8px 16px;
-            background: var(--accent);
+            background: var(--accent-purple);
             color: white;
             border: none;
             border-radius: 6px;
@@ -280,7 +549,7 @@ function generateHtmlReport(data) {
             transition: background 0.2s ease;
         }
         .lineage-controls button:hover {
-            background: rgba(120, 86, 255, 0.8);
+            background: rgba(139, 92, 246, 0.8);
         }
         .lineage-svg {
             width: 100%;
@@ -295,12 +564,12 @@ function generateHtmlReport(data) {
             stroke-width: 3px;
         }
         .node-table {
-            fill: rgba(120, 86, 255, 0.8);
-            stroke: rgba(120, 86, 255, 1);
+            fill: var(--chart-color-1);
+            stroke: var(--accent-purple);
         }
         .node-view {
-            fill: rgba(7, 176, 150, 0.8);
-            stroke: rgba(7, 176, 150, 1);
+            fill: var(--chart-color-3);
+            stroke: var(--success);
         }
         .node-text {
             fill: var(--text-primary);
@@ -313,12 +582,12 @@ function generateHtmlReport(data) {
             fill: none;
         }
         .link-view-dependency {
-            stroke: rgba(248, 188, 59, 0.8);
+            stroke: rgba(245, 158, 11, 0.8);
             stroke-width: 3;
             marker-end: url(#arrowhead-view);
         }
         .link-join-key {
-            stroke: rgba(7, 176, 150, 0.6);
+            stroke: rgba(16, 185, 129, 0.6);
             stroke-width: 2;
             stroke-dasharray: 5,5;
         }
@@ -337,63 +606,75 @@ function generateHtmlReport(data) {
     <div class="container">
         <header>
             <h1>BigQuery Dataset Audit</h1>
-            <p class="subtitle">Project: <code id="headerProject"></code> &nbsp;&bull;&nbsp; Dataset: <code id="headerDataset"></code> &nbsp;&bull;&nbsp; <span id="headerErrors" style="color: var(--lava-100);"></span></p>
+            <p class="subtitle">Project: <code id="headerProject"></code> &nbsp;&bull;&nbsp; Dataset: <code id="headerDataset"></code> &nbsp;&bull;&nbsp; <span id="headerErrors" style="color: var(--error-light);"></span></p>
         </header>
         <section class="summary-cards">
             <div class="card"><h3>Total Objects</h3><div class="number" id="summaryTotalObjects">0</div></div>
-            <div class="card"><h3>Tables</h3><div class="number" id="summaryTables">0</div></div>
-            <div class="card"><h3>Views</h3><div class="number" id="summaryViews">0</div></div>
+            <div class="card">
+                <h3>Tables & Views</h3>
+                <div style="display: flex; align-items: baseline; gap: 16px; justify-content: center;">
+                    <div style="text-align: center;">
+                        <div class="number" id="summaryTables">0</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Tables</div>
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 1.5rem;">+</div>
+                    <div style="text-align: center;">
+                        <div class="number" id="summaryViews">0</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Views</div>
+                    </div>
+                </div>
+            </div>
             <div class="card"><h3>Total Rows</h3><div class="number" id="summaryTotalRows">0</div></div>
             <div class="card"><h3>Total Size</h3><div class="number" id="summaryTotalSize">0 B</div></div>
         </section>
         
         <!-- Analytics Insights Section -->
         <section class="analytics-insights-section">
-            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🎯 Analytics & Data Quality Insights</h2>
+            <h2 style="color: var(--accent-purple-light); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🎯 Analytics & Data Quality Insights</h2>
             
             <!-- Mixpanel Compatibility Cards -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <div class="card" style="background: linear-gradient(135deg, rgba(120, 86, 255, 0.1), rgba(120, 86, 255, 0.05)); border-color: rgba(120, 86, 255, 0.3);">
-                    <h3 style="color: var(--accent);">🚀 Mixpanel Ready</h3>
-                    <div class="number" style="color: var(--accent);" id="mixpanelReadyCount">0</div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05)); border-color: rgba(139, 92, 246, 0.3);">
+                    <h3 style="color: var(--accent-purple);">🚀 Mixpanel Ready</h3>
+                    <div class="number" style="color: var(--accent-purple);" id="mixpanelReadyCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp + user ID</div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(7, 176, 150, 0.1), rgba(7, 176, 150, 0.05)); border-color: rgba(7, 176, 150, 0.3);">
-                    <h3 style="color: var(--mint-150);">📅 Event Tables</h3>
-                    <div class="number" style="color: var(--mint-150);" id="eventTablesCount">0</div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05)); border-color: rgba(16, 185, 129, 0.3);">
+                    <h3 style="color: var(--chart-color-3);">📅 Event Tables</h3>
+                    <div class="number" style="color: var(--chart-color-3);" id="eventTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp fields</div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(248, 188, 59, 0.1), rgba(248, 188, 59, 0.05)); border-color: rgba(248, 188, 59, 0.3);">
-                    <h3 style="color: var(--mustard-100);">👤 User Tables</h3>
-                    <div class="number" style="color: var(--mustard-100);" id="userTablesCount">0</div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05)); border-color: rgba(245, 158, 11, 0.3);">
+                    <h3 style="color: var(--chart-color-4);">👤 User Tables</h3>
+                    <div class="number" style="color: var(--chart-color-4);" id="userTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with user identifiers</div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(255, 117, 87, 0.1), rgba(255, 117, 87, 0.05)); border-color: rgba(255, 117, 87, 0.3);">
-                    <h3 style="color: var(--lava-100);">⚠️ PII Detected</h3>
-                    <div class="number" style="color: var(--lava-100);" id="piiTablesCount">0</div>
+                <div class="card" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05)); border-color: rgba(239, 68, 68, 0.3);">
+                    <h3 style="color: var(--error-light);">⚠️ PII Detected</h3>
+                    <div class="number" style="color: var(--error-light);" id="piiTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with potential PII</div>
                 </div>
             </div>
             
             <!-- Field Pattern Analysis -->
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
-                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">🏷️ Common Field Patterns</h3>
+                <div style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--accent-purple-light); font-size: 1.1rem; margin-bottom: 15px;">🏷️ Common Field Patterns</h3>
                     <div id="fieldPatternsAnalysis" style="display: grid; gap: 10px;"></div>
                 </div>
-                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
-                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">📊 Data Quality Overview</h3>
+                <div style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--accent-purple-light); font-size: 1.1rem; margin-bottom: 15px;">📊 Data Quality Overview</h3>
                     <div id="dataQualityOverview" style="display: grid; gap: 8px;"></div>
                 </div>
-                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
-                    <h3 style="color: var(--lava-100); font-size: 1.1rem; margin-bottom: 15px;">🏗️ Schema Complexity</h3>
+                <div style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--error-light); font-size: 1.1rem; margin-bottom: 15px;">🏗️ Schema Complexity</h3>
                     <div id="schemaComplexityOverview" style="display: grid; gap: 8px;"></div>
                 </div>
             </div>
         </section>
         
         <section class="analytics-section">
-            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">📊 Table Analytics</h2>
+            <h2 style="color: var(--accent-purple-light); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">📊 Table Analytics</h2>
             <div class="charts-grid">
                 <div class="chart-container full-width">
                     <div class="chart-title">Row Count Distribution (Top 20)</div>
@@ -419,68 +700,68 @@ function generateHtmlReport(data) {
         </section>
         
         <section class="lineage-section">
-            <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🔗 Table Relationships & Join Key Analysis</h2>
+            <h2 style="color: var(--accent-purple-light); font-weight: 600; margin-bottom: 20px; font-size: 1.8rem;">🔗 Table Relationships & Join Key Analysis</h2>
             
             <!-- Relationship Summary Cards -->
             <div class="relationship-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);" id="totalJoinKeys">0</div>
+                <div class="relationship-card" style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-purple);" id="totalJoinKeys">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Potential Join Keys</div>
                 </div>
-                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--mint-150);" id="connectedTables">0</div>
+                <div class="relationship-card" style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--chart-color-3);" id="connectedTables">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Connected Tables</div>
                 </div>
-                <div class="relationship-card" style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--mustard-100);" id="viewDependencies">0</div>
+                <div class="relationship-card" style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 8px; padding: 15px; text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--chart-color-4);" id="viewDependencies">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">View Dependencies</div>
                 </div>
             </div>
             
             <!-- ERD Table Selection -->
-            <div style="background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+            <div style="background: var(--bg-elevated); border: 1px solid var(--border-primary); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h4 style="color: var(--mint-100); font-size: 0.95rem; margin: 0;">📊 Select Tables for Diagram</h4>
+                    <h4 style="color: var(--accent-purple-light); font-size: 0.95rem; margin: 0;">📊 Select Tables for Diagram</h4>
                     <div style="display: flex; gap: 8px;">
-                        <button id="selectAllTables" style="padding: 4px 8px; background: var(--mint-150); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Select All</button>
+                        <button id="selectAllTables" style="padding: 4px 8px; background: var(--chart-color-3); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Select All</button>
                         <button id="clearAllTables" style="padding: 4px 8px; background: var(--text-secondary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Clear All</button>
                     </div>
                 </div>
-                <input type="text" id="tableSearchInput" placeholder="Search tables..." style="width: 100%; padding: 8px 12px; margin-bottom: 12px; font-size: 0.85rem; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
-                <div id="tableCheckboxes" style="max-height: 150px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 8px; background: var(--bg-dark); border-radius: 6px;"></div>
+                <input type="text" id="tableSearchInput" placeholder="Search tables..." style="width: 100%; padding: 8px 12px; margin-bottom: 12px; font-size: 0.85rem; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 4px; color: var(--text-primary);">
+                <div id="tableCheckboxes" style="max-height: 150px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 8px; background: var(--bg-primary); border-radius: 6px;"></div>
             </div>
             
             <!-- Interactive Network Diagram -->
             <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px;">
-                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; position: relative;">
+                <div style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px; position: relative;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3 style="color: var(--mint-100); font-size: 1.1rem; margin: 0;">🌐 Interactive Relationship Diagram</h3>
+                        <h3 style="color: var(--accent-purple-light); font-size: 1.1rem; margin: 0;">🌐 Interactive Relationship Diagram</h3>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <button id="resetDiagram" style="padding: 4px 8px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Reset</button>
+                            <button id="resetDiagram" style="padding: 4px 8px; background: var(--accent-purple); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Reset</button>
                             <label style="display: flex; align-items: center; font-size: 0.8rem; color: var(--text-secondary);"><input type="checkbox" id="showLabels" checked style="margin-right: 4px;"> Labels</label>
                         </div>
                     </div>
-                    <div style="height: 500px; border-radius: 8px; border: 1px solid var(--border-color); position: relative; overflow: hidden;">
+                    <div style="height: 500px; border-radius: 8px; border: 1px solid var(--border-primary); position: relative; overflow: hidden;">
                         <svg id="networkDiagram" style="width: 100%; height: 100%;"></svg>
-                        <div id="diagramTooltip" style="position: absolute; background: rgba(26, 36, 51, 0.95); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; font-size: 0.85rem; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 1000;"></div>
+                        <div id="diagramTooltip" style="position: absolute; background: rgba(33, 38, 45, 0.95); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 6px; padding: 8px 12px; font-size: 0.85rem; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 1000;"></div>
                     </div>
                     <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-secondary); display: flex; gap: 20px;">
-                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--accent);border-radius:50%;margin-right:4px;"></span>Tables</span>
-                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--mint-150);border-radius:50%;margin-right:4px;"></span>Views</span>
-                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--mint-150);margin-right:4px;"></span>Join Keys</span>
-                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--mustard-100);margin-right:4px;"></span>Dependencies</span>
+                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--accent-purple);border-radius:50%;margin-right:4px;"></span>Tables</span>
+                        <span><span style="display:inline-block;width:12px;height:12px;background:var(--chart-color-3);border-radius:50%;margin-right:4px;"></span>Views</span>
+                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--chart-color-3);margin-right:4px;"></span>Join Keys</span>
+                        <span><span style="display:inline-block;width:15px;height:2px;background:var(--chart-color-4);margin-right:4px;"></span>Dependencies</span>
                     </div>
                 </div>
                 
                 <!-- Analysis Panel -->
-                <div style="background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
-                    <h3 style="color: var(--mint-100); font-size: 1.1rem; margin-bottom: 15px;">🔍 Analysis</h3>
-                    <div id="selectedNodeInfo" style="margin-bottom: 20px; padding: 12px; background: var(--bg-dark); border-radius: 6px; min-height: 60px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Click a table or view to see details</div>
+                <div style="background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 12px; padding: 20px;">
+                    <h3 style="color: var(--accent-purple-light); font-size: 1.1rem; margin-bottom: 15px;">🔍 Analysis</h3>
+                    <div id="selectedNodeInfo" style="margin-bottom: 20px; padding: 12px; background: var(--bg-primary); border-radius: 6px; min-height: 60px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Click a table or view to see details</div>
                     
-                    <h4 style="color: var(--mint-150); font-size: 0.95rem; margin-bottom: 10px;">🔑 Join Keys</h4>
+                    <h4 style="color: var(--chart-color-3); font-size: 0.95rem; margin-bottom: 10px;">🔑 Join Keys</h4>
                     <div id="joinKeysAnalysis" style="max-height: 200px; overflow-y: auto;"></div>
                     
-                    <h4 style="color: var(--mustard-100); font-size: 0.95rem; margin: 15px 0 10px 0;">👁️ Dependencies</h4>
+                    <h4 style="color: var(--chart-color-4); font-size: 0.95rem; margin: 15px 0 10px 0;">👁️ Dependencies</h4>
                     <div id="viewDependenciesAnalysis" style="max-height: 150px; overflow-y: auto;"></div>
                 </div>
             </div>
@@ -488,12 +769,12 @@ function generateHtmlReport(data) {
         
         <main>
             <div style="margin-bottom: 25px;">
-                <h2 style="color: var(--mint-100); font-weight: 600; margin-bottom: 15px; font-size: 1.8rem;">🔍 Table Explorer</h2>
+                <h2 style="color: var(--accent-purple-light); font-weight: 600; margin-bottom: 15px; font-size: 1.8rem;">🔍 Table Explorer</h2>
                 
                 <!-- Enhanced Search and Filters -->
                 <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 15px; margin-bottom: 15px;">
-                    <input type="text" id="searchInput" placeholder="Search by table name, field name, or data type..." style="padding: 16px; font-size: 1rem; background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);">
-                    <select id="analyticsFilter" style="padding: 16px; font-size: 1rem; background: var(--bg-medium); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);">
+                    <input type="text" id="searchInput" placeholder="Search by table name, field name, or data type..." style="padding: 16px; font-size: 1rem; background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-primary);">
+                    <select id="analyticsFilter" style="padding: 16px; font-size: 1rem; background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-primary);">
                         <option value="">Show All Tables</option>
                         <option value="mixpanel_ready">🚀 Mixpanel Ready</option>
                         <option value="event_tables">📅 Event Tables</option>
@@ -510,7 +791,7 @@ function generateHtmlReport(data) {
                 </div>
                 
                 <!-- Quick Stats for Filtered Results -->
-                <div id="filterStats" style="display: none; background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 15px; font-size: 0.9rem; color: var(--text-secondary);"></div>
+                <div id="filterStats" style="display: none; background: var(--bg-elevated); border: 1px solid var(--border-primary); border-radius: 8px; padding: 12px; margin-bottom: 15px; font-size: 0.9rem; color: var(--text-secondary);"></div>
             </div>
             
             <div id="tablesContainer"></div>
@@ -619,10 +900,10 @@ function generateHtmlReport(data) {
                 if (patterns.timestamp_fields && patterns.timestamp_fields.length > 0) {
                     const truncated = patterns.timestamp_fields.slice(0, 3).join(', ') + (patterns.timestamp_fields.length > 3 ? ', ...' : '');
                     const full = patterns.timestamp_fields.join(', ');
-                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mint-150);">
-                        <div style="font-weight: 600; color: var(--mint-150); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('timestamp')">
+                    html += \`<div style="background: var(--bg-primary); border-radius: 6px; padding: 10px; border-left: 3px solid var(--chart-color-3);">
+                        <div style="font-weight: 600; color: var(--chart-color-3); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('timestamp')">
                             <span>⏰ Timestamp Fields (\${patterns.timestamp_fields.length})</span>
-                            <span id="timestamp-arrow" style="color: var(--mint-150); font-size: 0.8rem;">▶</span>
+                            <span id="timestamp-arrow" style="color: var(--chart-color-3); font-size: 0.8rem;">▶</span>
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary);">
                             <div id="timestamp-truncated">\${truncated}</div>
@@ -634,10 +915,10 @@ function generateHtmlReport(data) {
                 if (patterns.user_id_fields && patterns.user_id_fields.length > 0) {
                     const truncated = patterns.user_id_fields.slice(0, 3).join(', ') + (patterns.user_id_fields.length > 3 ? ', ...' : '');
                     const full = patterns.user_id_fields.join(', ');
-                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--accent);">
-                        <div style="font-weight: 600; color: var(--accent); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('userid')">
+                    html += \`<div style="background: var(--bg-primary); border-radius: 6px; padding: 10px; border-left: 3px solid var(--accent-purple);">
+                        <div style="font-weight: 600; color: var(--accent-purple); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('userid')">
                             <span>👤 User ID Fields (\${patterns.user_id_fields.length})</span>
-                            <span id="userid-arrow" style="color: var(--accent); font-size: 0.8rem;">▶</span>
+                            <span id="userid-arrow" style="color: var(--accent-purple); font-size: 0.8rem;">▶</span>
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary);">
                             <div id="userid-truncated">\${truncated}</div>
@@ -649,10 +930,10 @@ function generateHtmlReport(data) {
                 if (patterns.event_id_fields && patterns.event_id_fields.length > 0) {
                     const truncated = patterns.event_id_fields.slice(0, 3).join(', ') + (patterns.event_id_fields.length > 3 ? ', ...' : '');
                     const full = patterns.event_id_fields.join(', ');
-                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--mustard-100);">
-                        <div style="font-weight: 600; color: var(--mustard-100); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('eventid')">
+                    html += \`<div style="background: var(--bg-primary); border-radius: 6px; padding: 10px; border-left: 3px solid var(--chart-color-4);">
+                        <div style="font-weight: 600; color: var(--chart-color-4); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('eventid')">
                             <span>🔑 Event ID Fields (\${patterns.event_id_fields.length})</span>
-                            <span id="eventid-arrow" style="color: var(--mustard-100); font-size: 0.8rem;">▶</span>
+                            <span id="eventid-arrow" style="color: var(--chart-color-4); font-size: 0.8rem;">▶</span>
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary);">
                             <div id="eventid-truncated">\${truncated}</div>
@@ -664,10 +945,10 @@ function generateHtmlReport(data) {
                 if (patterns.session_fields && patterns.session_fields.length > 0) {
                     const truncated = patterns.session_fields.slice(0, 3).join(', ') + (patterns.session_fields.length > 3 ? ', ...' : '');
                     const full = patterns.session_fields.join(', ');
-                    html += \`<div style="background: var(--bg-dark); border-radius: 6px; padding: 10px; border-left: 3px solid var(--lava-100);">
-                        <div style="font-weight: 600; color: var(--lava-100); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('session')">
+                    html += \`<div style="background: var(--bg-primary); border-radius: 6px; padding: 10px; border-left: 3px solid var(--error-light);">
+                        <div style="font-weight: 600; color: var(--error-light); font-size: 0.9rem; margin-bottom: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleFieldPattern('session')">
                             <span>🔗 Session Fields (\${patterns.session_fields.length})</span>
-                            <span id="session-arrow" style="color: var(--lava-100); font-size: 0.8rem;">▶</span>
+                            <span id="session-arrow" style="color: var(--error-light); font-size: 0.8rem;">▶</span>
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary);">
                             <div id="session-truncated">\${truncated}</div>
@@ -696,17 +977,17 @@ function generateHtmlReport(data) {
                 
                 let html = \`
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--mint-150);">\${highQualityTables}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--chart-color-3);">\${highQualityTables}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">High Quality</div>
                         </div>
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent);">\${tablesWithNonNullable}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent-purple);">\${tablesWithNonNullable}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">Non-nullable Fields</div>
                         </div>
                     </div>
-                    <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center; margin-top: 8px;">
-                        <div style="font-size: 1.1rem; font-weight: 600; color: var(--mustard-100);">\${avgMixpanelScore.toFixed(1)}/10</div>
+                    <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center; margin-top: 8px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: var(--chart-color-4);">\${avgMixpanelScore.toFixed(1)}/10</div>
                         <div style="font-size: 0.75rem; color: var(--text-secondary);">Avg Analytics Score</div>
                     </div>
                 \`;
@@ -733,28 +1014,28 @@ function generateHtmlReport(data) {
                 
                 let html = \`
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--lava-100);">\${tablesWithStruct}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--error-light);">\${tablesWithStruct}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">Tables with STRUCTs</div>
                         </div>
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--lava-100);">\${tablesWithRepeated}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--error-light);">\${tablesWithRepeated}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">Tables with REPEATED</div>
                         </div>
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--mustard-100);">\${tablesWithNested}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--chart-color-4);">\${tablesWithNested}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">Nested Fields</div>
                         </div>
-                        <div style="background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent);">\${totalComplexFields}</div>
+                        <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px; text-align: center;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: var(--accent-purple);">\${totalComplexFields}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">Total Complex</div>
                         </div>
                     </div>
                 \`;
                 
                 if (totalComplexFields > 0) {
-                    html += \`<div style="margin-top: 10px; padding: 8px; background: rgba(255, 117, 87, 0.1); border-radius: 6px; border-left: 3px solid var(--lava-100);">
-                        <div style="font-size: 0.8rem; color: var(--lava-100); font-weight: 600;">⚠️ Mixpanel Incompatible Fields Detected</div>
+                    html += \`<div style="margin-top: 10px; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 6px; border-left: 3px solid var(--error-light);">
+                        <div style="font-size: 0.8rem; color: var(--error-light); font-weight: 600;">⚠️ Mixpanel Incompatible Fields Detected</div>
                         <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Consider flattening STRUCT/REPEATED fields for analytics</div>
                     </div>\`;
                 }
@@ -858,9 +1139,9 @@ function generateHtmlReport(data) {
                     
                     // Get analytics insights for this table
                     const analytics = data.analytics ? data.analytics.data_quality.find(a => a.table_name === table.table_name) : null;
-                    const mixpanelBadge = analytics && analytics.mixpanel_score >= 4 ? \`<div class="badge" style="background: rgba(120, 86, 255, 0.15); color: var(--accent);">🚀 Mixpanel Ready</div>\` : '';
-                    const piiWarning = analytics && analytics.data_quality.potential_pii.length > 0 ? \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--lava-100);">⚠️ PII</div>\` : '';
-                    const qualityScore = analytics ? \`<div class="badge" style="background: rgba(7, 176, 150, 0.15); color: var(--mint-150);">Score: \${analytics.mixpanel_score}/10</div>\` : '';
+                    const mixpanelBadge = analytics && analytics.mixpanel_score >= 4 ? \`<div class="badge" style="background: rgba(139, 92, 246, 0.15); color: var(--accent-purple);">🚀 Mixpanel Ready</div>\` : '';
+                    const piiWarning = analytics && analytics.data_quality.potential_pii.length > 0 ? \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--error-light);">⚠️ PII</div>\` : '';
+                    const qualityScore = analytics ? \`<div class="badge" style="background: rgba(7, 176, 150, 0.15); color: var(--chart-color-3);">Score: \${analytics.mixpanel_score}/10</div>\` : '';
                     
                     // Schema complexity badges
                     let complexityBadge = '';
@@ -869,7 +1150,7 @@ function generateHtmlReport(data) {
                         const hasComplexFields = complexity.struct_fields > 0 || complexity.repeated_fields > 0 || complexity.nested_fields > 0;
                         if (hasComplexFields) {
                             const complexityCount = complexity.struct_fields + complexity.repeated_fields;
-                            complexityBadge = \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--lava-100);" title="STRUCT: \${complexity.struct_fields}, REPEATED: \${complexity.repeated_fields}, NESTED: \${complexity.nested_fields}">🏗️ Complex (\${complexityCount})</div>\`;
+                            complexityBadge = \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--error-light);" title="STRUCT: \${complexity.struct_fields}, REPEATED: \${complexity.repeated_fields}, NESTED: \${complexity.nested_fields}">🏗️ Complex (\${complexityCount})</div>\`;
                         }
                     }
                     
@@ -878,10 +1159,10 @@ function generateHtmlReport(data) {
                     if (analytics && analytics.data_freshness) {
                         const freshness = analytics.data_freshness;
                         const colors = {
-                            fresh: { bg: 'rgba(7, 176, 150, 0.15)', color: 'var(--mint-150)', icon: '🟢' },
-                            recent: { bg: 'rgba(248, 188, 59, 0.15)', color: 'var(--mustard-100)', icon: '🟡' },
-                            stale: { bg: 'rgba(255, 117, 87, 0.15)', color: 'var(--lava-100)', icon: '🟠' },
-                            old: { bg: 'rgba(120, 86, 255, 0.15)', color: 'var(--accent)', icon: '🔴' }
+                            fresh: { bg: 'rgba(7, 176, 150, 0.15)', color: 'var(--chart-color-3)', icon: '🟢' },
+                            recent: { bg: 'rgba(245, 158, 11, 0.15)', color: 'var(--chart-color-4)', icon: '🟡' },
+                            stale: { bg: 'rgba(255, 117, 87, 0.15)', color: 'var(--error-light)', icon: '🟠' },
+                            old: { bg: 'rgba(139, 92, 246, 0.15)', color: 'var(--accent-purple)', icon: '🔴' }
                         };
                         const style = colors[freshness.freshness_score] || colors.old;
                         freshnessBadge = \`<div class="badge" style="background: \${style.bg}; color: \${style.color};" title="Last updated \${freshness.newest_record_days_ago} days ago">\${style.icon} \${freshness.newest_record_days_ago}d ago</div>\`;
@@ -1194,7 +1475,7 @@ function generateHtmlReport(data) {
                 renderD3BarChart('rowCountChart', rowCountData, {
                     valueAccessor: function(d) { return d.row_count; },
                     labelAccessor: function(d) { return d.table_name; },
-                    color: 'rgba(7, 176, 150, 0.8)',
+                    color: 'rgba(16, 185, 129, 0.8)',
                     formatValue: function(d) {
                         if (d >= 1000000) return (d / 1000000).toFixed(1) + 'M';
                         if (d >= 1000) return (d / 1000).toFixed(1) + 'K';
@@ -1215,9 +1496,9 @@ function generateHtmlReport(data) {
                 const typeData = Object.entries(typeCounts).map(function(entry) { return { label: entry[0], value: entry[1] }; });
                 renderD3PieChart('tableTypeChart', typeData, {
                     colors: {
-                        'BASE TABLE': 'rgba(120, 86, 255, 0.8)',
-                        'MATERIALIZED VIEW': 'rgba(7, 176, 150, 0.8)', 
-                        'VIEW': 'rgba(248, 188, 59, 0.8)'
+                        'BASE TABLE': 'var(--chart-color-1)',
+                        'MATERIALIZED VIEW': 'var(--chart-color-3)', 
+                        'VIEW': 'var(--chart-color-4)'
                     }
                 });
 
@@ -1231,8 +1512,8 @@ function generateHtmlReport(data) {
                 const partitionData = Object.entries(partitionCounts).map(function(entry) { return { label: entry[0], value: entry[1] }; });
                 renderD3PieChart('partitionChart', partitionData, {
                     colors: {
-                        'Partitioned': 'rgba(120, 86, 255, 0.8)',
-                        'Non-Partitioned': 'rgba(255, 117, 87, 0.8)'
+                        'Partitioned': 'var(--chart-color-1)',
+                        'Non-Partitioned': 'var(--chart-color-5)'
                     }
                 });
 
@@ -1257,11 +1538,11 @@ function generateHtmlReport(data) {
                     
                     renderD3PieChart('freshnessChart', freshnessData, {
                         colors: {
-                            'Fresh': 'rgba(7, 176, 150, 0.8)',
-                            'Recent': 'rgba(248, 188, 59, 0.8)',
-                            'Stale': 'rgba(255, 117, 87, 0.8)',
-                            'Old': 'rgba(120, 86, 255, 0.8)',
-                            'No Timestamp': 'rgba(163, 179, 204, 0.8)'
+                            'Fresh': 'var(--success)',
+                            'Recent': 'var(--chart-color-4)',
+                            'Stale': 'var(--warning)',
+                            'Old': 'var(--chart-color-5)',
+                            'No Timestamp': 'var(--text-muted)'
                         }
                     });
 
@@ -1282,11 +1563,11 @@ function generateHtmlReport(data) {
                     
                     renderD3PieChart('analyticsScoreChart', scoreData, {
                         colors: {
-                            '0-2': 'rgba(255, 117, 87, 0.8)',
-                            '3-4': 'rgba(248, 188, 59, 0.8)',
-                            '5-6': 'rgba(7, 176, 150, 0.8)',
-                            '7-8': 'rgba(120, 86, 255, 0.8)',
-                            '9-10': 'rgba(7, 176, 150, 1.0)'
+                            '0-2': 'var(--chart-color-5)',
+                            '3-4': 'var(--chart-color-4)',
+                            '5-6': 'var(--chart-color-2)',
+                            '7-8': 'var(--chart-color-1)',
+                            '9-10': 'var(--chart-color-3)'
                         }
                     });
                 }
@@ -1444,7 +1725,7 @@ function generateHtmlReport(data) {
                     .join('path')
                     .attr('class', 'd3-pie-slice')
                     .attr('d', arc)
-                    .attr('fill', function(d) { return options.colors[d.data.label] || 'rgba(120, 86, 255, 0.8)'; })
+                    .attr('fill', function(d) { return options.colors[d.data.label] || 'rgba(139, 92, 246, 0.8)'; })
                     .attr('stroke', 'rgba(255, 255, 255, 0.1)')
                     .attr('stroke-width', 2)
                     .on('mouseover', function(event, d) {
@@ -1475,7 +1756,7 @@ function generateHtmlReport(data) {
                 
                 legendItems.append('circle')
                     .attr('r', 6)
-                    .attr('fill', function(d) { return options.colors[d.label] || 'rgba(120, 86, 255, 0.8)'; });
+                    .attr('fill', function(d) { return options.colors[d.label] || 'rgba(139, 92, 246, 0.8)'; });
                 
                 legendItems.append('text')
                     .attr('x', 12)
@@ -1488,7 +1769,7 @@ function generateHtmlReport(data) {
             function renderLineage() {
                 if (!data.lineage || !data.lineage.nodes || data.lineage.nodes.length === 0) {
                     const lineageSection = document.querySelector('.lineage-section');
-                    lineageSection.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 50px; background: var(--bg-medium); border-radius: 12px; border: 1px solid var(--border-color);"><h2 style="color: var(--mint-100); margin-bottom: 15px;">🔗 Table Relationships & Join Key Analysis</h2>No relationships found. Views with table dependencies and tables with shared join keys will appear here.</div>';
+                    lineageSection.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 50px; background: var(--bg-medium); border-radius: 12px; border: 1px solid var(--border-color);"><h2 style="color: var(--accent-purple-light); margin-bottom: 15px;">🔗 Table Relationships & Join Key Analysis</h2>No relationships found. Views with table dependencies and tables with shared join keys will appear here.</div>';
                     return;
                 }
                 
@@ -1551,10 +1832,10 @@ function generateHtmlReport(data) {
                         const tables = Array.from(entry[1]);
                         const connectivity = tables.length;
                         
-                        let connectivityColor = connectivity >= 4 ? 'var(--lava-100)' : connectivity >= 2 ? 'var(--mustard-100)' : 'var(--text-secondary)';
+                        let connectivityColor = connectivity >= 4 ? 'var(--error-light)' : connectivity >= 2 ? 'var(--chart-color-4)' : 'var(--text-secondary)';
                         
-                        html += '<div style="background: var(--bg-dark); border-radius: 4px; padding: 8px; border-left: 3px solid var(--mint-150);">';
-                        html += '<div style="font-weight: 600; color: var(--mint-150); font-size: 0.85rem; margin-bottom: 3px;">' + key + '</div>';
+                        html += '<div style="background: var(--bg-primary); border-radius: 4px; padding: 8px; border-left: 3px solid var(--chart-color-3);">';
+                        html += '<div style="font-weight: 600; color: var(--chart-color-3); font-size: 0.85rem; margin-bottom: 3px;">' + key + '</div>';
                         html += '<div style="font-size: 0.75rem; color: var(--text-secondary);">' + connectivity + ' tables</div>';
                         html += '</div>';
                     });
@@ -1601,9 +1882,9 @@ function generateHtmlReport(data) {
                     label.title = node.id; // Add tooltip with full table name
                     label.style.cssText = 'cursor: pointer; font-size: 0.85rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;';
                     if (node.type === 'VIEW') {
-                        label.style.color = 'var(--mint-150)';
+                        label.style.color = 'var(--chart-color-3)';
                     } else {
-                        label.style.color = 'var(--accent)';
+                        label.style.color = 'var(--accent-purple)';
                     }
                     
                     checkboxDiv.appendChild(checkbox);
@@ -1711,7 +1992,7 @@ function generateHtmlReport(data) {
                     .selectAll('line')
                     .data(filteredEdges)
                     .join('line')
-                    .attr('stroke', function(d) { return d.type === 'view_dependency' ? 'var(--mustard-100)' : 'var(--mint-150)'; })
+                    .attr('stroke', function(d) { return d.type === 'view_dependency' ? 'var(--chart-color-4)' : 'var(--chart-color-3)'; })
                     .attr('stroke-width', function(d) { return d.type === 'view_dependency' ? 2 : 1; })
                     .attr('stroke-dasharray', function(d) { return d.type === 'join_key' ? '4,4' : 'none'; })
                     .attr('opacity', 0.7);
@@ -1754,7 +2035,7 @@ function generateHtmlReport(data) {
                 // Add circles
                 nodes.append('circle')
                     .attr('r', function(d) { return Math.max(12, Math.min(20, Math.sqrt(d.row_count / 10000))); })
-                    .attr('fill', function(d) { return d.type === 'VIEW' ? 'var(--mint-150)' : 'var(--accent)'; })
+                    .attr('fill', function(d) { return d.type === 'VIEW' ? 'var(--chart-color-3)' : 'var(--chart-color-1)'; })
                     .attr('stroke', 'white')
                     .attr('stroke-width', 2)
                     .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
@@ -1854,15 +2135,15 @@ function generateHtmlReport(data) {
                     const dependencies = connectedEdges.filter(function(e) { return e.type === 'view_dependency'; });
                     
                     let html = '<div style="text-align: left;">';
-                    html += '<h4 style="color: var(--mint-100); margin: 0 0 8px 0; font-size: 1rem;">' + node.id + '</h4>';
+                    html += '<h4 style="color: var(--accent-purple-light); margin: 0 0 8px 0; font-size: 1rem;">' + node.id + '</h4>';
                     html += '<div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 8px;">' + node.type + ' • ' + node.row_count.toLocaleString() + ' rows</div>';
                     
                     if (joinKeys.length > 0) {
-                        html += '<div style="margin-bottom: 8px;"><strong style="color: var(--mint-150); font-size: 0.85rem;">Join Keys:</strong><br/><span style="font-size: 0.8rem; color: var(--text-primary);">' + joinKeys.join(', ') + '</span></div>';
+                        html += '<div style="margin-bottom: 8px;"><strong style="color: var(--chart-color-3); font-size: 0.85rem;">Join Keys:</strong><br/><span style="font-size: 0.8rem; color: var(--text-primary);">' + joinKeys.join(', ') + '</span></div>';
                     }
                     
                     if (dependencies.length > 0) {
-                        html += '<div><strong style="color: var(--mustard-100); font-size: 0.85rem;">Dependencies:</strong><br/>';
+                        html += '<div><strong style="color: var(--chart-color-4); font-size: 0.85rem;">Dependencies:</strong><br/>';
                         dependencies.forEach(function(dep) {
                             const other = dep.source.id === node.id ? dep.target.id : dep.source.id;
                             html += '<span style="font-size: 0.8rem; color: var(--text-primary);">' + other + '</span><br/>';
@@ -1890,9 +2171,9 @@ function generateHtmlReport(data) {
                     const sourceId = dep.source && dep.source.id ? dep.source.id : (dep.source || 'unknown');
                     const targetId = dep.target && dep.target.id ? dep.target.id : (dep.target || 'unknown');
                     
-                    html += '<div style="background: var(--bg-dark); border-radius: 4px; padding: 6px; border-left: 3px solid var(--mustard-100);">';
+                    html += '<div style="background: var(--bg-primary); border-radius: 4px; padding: 6px; border-left: 3px solid var(--chart-color-4);">';
                     html += '<div style="font-size: 0.8rem; color: var(--text-primary);">';
-                    html += '<span style="color: var(--mustard-100);">' + targetId + '</span> → <span style="color: var(--mint-150);">' + sourceId + '</span>';
+                    html += '<span style="color: var(--chart-color-4);">' + targetId + '</span> → <span style="color: var(--chart-color-3);">' + sourceId + '</span>';
                     html += '</div>';
                     html += '</div>';
                 });
@@ -1989,7 +2270,7 @@ function generateHtmlReport(data) {
                     .data(data.lineage.edges)
                     .join('path')
                     .attr('class', d => 'link link-' + d.type.replace('_', '-'))
-                    .attr('stroke', d => d.type === 'view_dependency' ? 'rgba(248, 188, 59, 0.8)' : 'rgba(7, 176, 150, 0.6)')
+                    .attr('stroke', d => d.type === 'view_dependency' ? 'rgba(245, 158, 11, 0.8)' : 'rgba(16, 185, 129, 0.6)')
                     .attr('stroke-width', d => d.type === 'view_dependency' ? 3 : 2)
                     .attr('stroke-dasharray', d => d.type === 'join_key' ? '5,5' : 'none')
                     .attr('fill', 'none')

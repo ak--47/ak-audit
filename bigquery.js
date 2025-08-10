@@ -20,8 +20,8 @@ const config = {
 const EXCLUDE_AS_JOIN_KEYS = [
 	"event",
 	"event_name",
-	"event_id",
-	"insert_id",
+	// "event_id",
+	// "insert_id",
 	"time",
 	"timestamp",
 	"created_at",
@@ -30,12 +30,12 @@ const EXCLUDE_AS_JOIN_KEYS = [
 	"_table_suffix",
 	"_partitiontime",
 	"_partitiondate",
-	"distinct_id",
-	"user_id",
-	"email",
-	"client_id",
-	"visit_id",
-	"session_id",
+	// "distinct_id",
+	// "user_id",
+	// "email",
+	// "client_id",
+	// "visit_id",
+	// "session_id",
 	"event_definition_id"
 ];
 
@@ -314,7 +314,7 @@ function analyzeAnalyticsCompatibility(tables) {
 			}
 
 			// PII detection
-			if (/email|phone|address|ssn|social|name|first|last/i.test(fieldName)) {
+			if (/email|phone|address|ssn|social|first|last/i.test(fieldName)) {
 				analysis.data_quality.potential_pii.push(field.column_name);
 			}
 
