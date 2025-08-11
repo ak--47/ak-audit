@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import generateHtmlReport from './buildReport.js';
+import { runAudit } from './audit.js';
 
 // ANSI color codes for terminal output
 const colors = {
@@ -12,20 +13,35 @@ const colors = {
 
 async function rebuildHtmlReport() {
     try {
-        console.log(`${colors.yellow}🔄 Rebuilding HTML report from existing audit data...${colors.nc}`);
+        console.log(`${colors.yellow}🔄 Rebuilding HTML report from audit data...${colors.nc}`);
         
-        // Read the existing audit data
+        // Check if we have raw data to process first
+        const rawDataPath = path.join('./output', 'reports', 'dataset_raw.json');
         const auditDataPath = path.join('./output', 'reports', 'dataset_audit.json');
-        console.log(`📖 Reading audit data from: ${auditDataPath}`);
         
         let auditData;
+        
+        // Check if audit data exists and is newer than raw data
         try {
+            const [rawStats, auditStats] = await Promise.all([
+                fs.stat(rawDataPath).catch(() => null),
+                fs.stat(auditDataPath).catch(() => null)
+            ]);
+            
+            if (rawStats && (!auditStats || rawStats.mtime > auditStats.mtime)) {
+                console.log(`📊 Found newer raw data, running audit analysis first...`);
+                await runAudit();
+            }
+            
+            console.log(`📖 Reading audit data from: ${auditDataPath}`);
             const auditDataContent = await fs.readFile(auditDataPath, 'utf8');
             auditData = JSON.parse(auditDataContent);
+            
         } catch (error) {
             if (error.code === 'ENOENT') {
                 console.error(`${colors.red}❌ Error: Audit data file not found at ${auditDataPath}${colors.nc}`);
-                console.error(`${colors.red}   Please run the main audit script first: node bigquery.js${colors.nc}`);
+                console.error(`${colors.red}   Please run: node bigquery.js first to extract data${colors.nc}`);
+                console.error(`${colors.red}   Then run: node audit.js to analyze data${colors.nc}`);
                 process.exit(1);
             } else if (error instanceof SyntaxError) {
                 console.error(`${colors.red}❌ Error: Invalid JSON in audit data file${colors.nc}`);

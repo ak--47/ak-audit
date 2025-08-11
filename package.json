@@ -5,12 +5,14 @@
 	"bin": {
 		"dwh-audit": "./bin/dwh-audit.js"
 	},
-	"main": "./bigquery.js",
+	"main": "./index.d.ts",
 	"files": [
 		"bin/",
 		"bigquery.js",
+		"audit.js",
 		"buildReport.js",
 		"rebuild.js",
+		"index.d.ts",
 		"README.md",
 		"CLAUDE.md"
 	],
@@ -32,13 +34,16 @@
 		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser",
 		"serve": "npx serve ./output/reports",
 		"rebuild": "node rebuild.js",
+		"extract": "node bigquery.js",
+		"analyze": "node audit.js",
+		"report": "node rebuild.js",
 		"rebuild:watch": "nodemon rebuild.js",
 		"post": "npm publish --access public"
 	},
-	"keywords": ["bigquery", "audit", "data-warehouse", "analytics", "cli", "data-quality", "google-cloud", "schema-analysis"],
+	"keywords": ["bigquery", "audit", "data-warehouse", "analytics", "cli", "data-quality", "google-cloud", "schema-analysis", "mixpanel", "typescript", "modular"],
 	"author": "ak@mixpanel.com",
 	"license": "MIT",
-	"description": "CLI tool for auditing BigQuery datasets - analyze schemas, sample data, and generate comprehensive reports",
+	"description": "Modular CLI tool for auditing data warehouses - extract, analyze, and report on schemas, data quality, and analytics readiness",
 	"dependencies": {
 		"@google-cloud/bigquery": "^8.1.1",
 		"google-auth-library": "^9.0.0",
