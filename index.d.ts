@@ -247,44 +247,107 @@ export interface TableAnalysis {
     /** Table type */
     table_type: "TABLE" | "VIEW";
 
+    /** Table category based on analytics patterns */
+    table_category: "EVENT" | "USER" | "LOOKUP" | "UNKNOWN";
+
     /** Mixpanel compatibility score (0-10) */
-    mixpanel_score: number;
+    mixpanel_compatibility: number;
 
-    /** Analytics features detected */
-    analytics_features: AnalyticsFeatures;
+    /** Number of rows in the table */
+    row_count: number;
 
-    /** Data quality assessment */
-    data_quality: DataQualityMetrics;
+    /** Size in bytes */
+    size_bytes: number;
 
-    /** Per-field analysis results */
-    field_analysis: Record<
-        string,
-        {
+    /** Creation timestamp */
+    creation_time: string;
+
+    /** Required fields analysis for different patterns */
+    required_fields: {
+        /** Whether table has timestamp fields */
+        has_timestamp: boolean;
+
+        /** Whether table has user identifier fields */
+        has_user_id: boolean;
+
+        /** Detected timestamp fields */
+        timestamp_fields: Array<{
+            name: string;
             type: string;
             nullable: boolean;
-            partitioning_column: boolean;
-            join_key: boolean;
-        }
-    >;
+            by_type: boolean;
+            by_name: boolean;
+        }>;
+
+        /** Detected user ID fields */
+        user_id_fields: Array<{
+            name: string;
+            type: string;
+            nullable: boolean;
+        }>;
+    };
+
+    /** Event schema type classification */
+    event_schema_type: "MULTI_SCHEMA" | "MONO_SCHEMA" | null;
 
     /** Schema complexity metrics */
-    schema_complexity: SchemaComplexity;
+    schema_complexity: {
+        /** Total number of fields */
+        total_fields: number;
+
+        /** Complex fields (STRUCT, RECORD, JSON, REPEATED) */
+        complex_fields: string[];
+
+        /** Maximum nesting depth */
+        nested_depth: number;
+
+        /** Total number of subfields */
+        total_subfields: number;
+    };
+
+    /** Data quality assessment */
+    data_quality: {
+        /** Fields that may contain PII */
+        potential_pii: Array<{
+            field: string;
+            types: string[];
+        }>;
+
+        /** Volume category based on row count */
+        volume_category: "SMALL" | "MEDIUM" | "LARGE" | "UNKNOWN";
+
+        /** Days since table creation/update */
+        freshness: number | null;
+    };
+
+    /** Detailed field information */
+    field_details: Record<string, {
+        type: string;
+        nullable: boolean;
+        join_key: boolean;
+    }>;
 }
 
 /**
  * Overall analytics insights across dataset
  */
 export interface AnalyticsInsights {
-    /** Tables ready for Mixpanel (score >= 4) */
-    mixpanel_ready: TableAnalysis[];
-
-    /** Tables with timestamp fields */
+    /** Tables with event-like patterns (timestamp + user_id) */
     event_tables: TableAnalysis[];
 
-    /** Tables with user identifiers */
+    /** Tables with user identifiers but no timestamp */
     user_tables: TableAnalysis[];
 
-    /** All table analyses */
+    /** Tables with arbitrary join keys */
+    lookup_tables: TableAnalysis[];
+
+    /** Tables with complex nested structures */
+    complex_fields: TableAnalysis[];
+
+    /** Tables with potential PII fields */
+    pii_warnings: TableAnalysis[];
+
+    /** All table analyses (required by UI) */
     data_quality: TableAnalysis[];
 
     /** Field patterns found across dataset */
@@ -295,11 +358,17 @@ export interface AnalyticsInsights {
         /** User ID field names found */
         user_id_fields: string[];
 
-        /** Event ID field names found */
-        event_id_fields: string[];
+        /** Event name field names found */
+        event_name_fields: string[];
 
         /** Session field names found */
         session_fields: string[];
+
+        /** Complex field names found */
+        complex_fields: string[];
+
+        /** PII field names found */
+        pii_fields: string[];
     };
 }
 

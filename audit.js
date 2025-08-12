@@ -5,7 +5,7 @@ import path from "path";
 
 // --- Configuration ---
 const config = {
-    inputFile: process.argv[2] || "./output/reports/dataset_raw.json",
+    inputFile: process.env.RAW_DATA_FILE || process.argv[2] || "./output/reports/dataset_raw.json",
     outputDir: process.argv[3] || "./output"
 };
 
@@ -41,6 +41,7 @@ function analyzeAnalyticsCompatibility(tables) {
         lookup_tables: [],     // Tables with arbitrary join keys, no timestamp
         complex_fields: [],    // Tables with complex nested structures
         pii_warnings: [],      // Tables with potential PII fields
+        data_quality: [],      // All table analyses (required by TypeScript definition and UI)
         field_patterns: {
             timestamp_fields: new Set(),
             user_id_fields: new Set(),
@@ -74,7 +75,8 @@ function analyzeAnalyticsCompatibility(tables) {
         { pattern: /^(.*_)?(ip|ip_addr|ip_address)(_.*)?$/i, type: 'ip_address' }
     ];
 
-    tables.forEach(table => {
+    tables.forEach((table, index) => {
+        try {
         const analysis = {
             table_name: table.table_name,
             table_type: table.table_type,
@@ -170,11 +172,11 @@ function analyzeAnalyticsCompatibility(tables) {
                         type: fieldType,
                         subfield_count: fieldGroup.length,
                         subfields: fieldGroup.map(f => ({
-                            path: f.nested_field_path,
-                            type: f.nested_type,
-                            depth: f.nested_field_path.split('.').length
+                            path: f.nested_field_path || f.column_name,
+                            type: f.nested_type || f.data_type,
+                            depth: (f.nested_field_path || f.column_name).split('.').length
                         })),
-                        max_nesting_depth: Math.max(...fieldGroup.map(f => f.nested_field_path.split('.').length))
+                        max_nesting_depth: fieldGroup.length > 0 ? Math.max(...fieldGroup.map(f => (f.nested_field_path || f.column_name).split('.').length)) : 1
                     };
                     
                     analysis.schema_complexity.complex_fields.push(complexField);
@@ -298,15 +300,24 @@ function analyzeAnalyticsCompatibility(tables) {
         if (analysis.data_quality.potential_pii.length > 0) {
             insights.pii_warnings.push(analysis);
         }
+
+        // Add to global data_quality array (required by TypeScript definition and UI)
+        insights.data_quality.push(analysis);
+        
+        } catch (error) {
+            console.error(`Error processing table ${index} (${table.table_name}):`, error.message);
+            console.error(`Error stack:`, error.stack);
+            throw error;
+        }
     });
 
     // Convert Sets to Arrays for JSON serialization
-    insights.field_patterns.timestamp_fields = Array.from(insights.field_patterns.timestamp_fields);
-    insights.field_patterns.user_id_fields = Array.from(insights.field_patterns.user_id_fields);
-    insights.field_patterns.event_name_fields = Array.from(insights.field_patterns.event_name_fields);
-    insights.field_patterns.session_fields = Array.from(insights.field_patterns.session_fields);
-    insights.field_patterns.complex_fields = Array.from(insights.field_patterns.complex_fields);
-    insights.field_patterns.pii_fields = Array.from(insights.field_patterns.pii_fields);
+    insights.field_patterns.timestamp_fields = Array.from(insights.field_patterns.timestamp_fields || []);
+    insights.field_patterns.user_id_fields = Array.from(insights.field_patterns.user_id_fields || []);
+    insights.field_patterns.event_name_fields = Array.from(insights.field_patterns.event_name_fields || []);
+    insights.field_patterns.session_fields = Array.from(insights.field_patterns.session_fields || []);
+    insights.field_patterns.complex_fields = Array.from(insights.field_patterns.complex_fields || []);
+    insights.field_patterns.pii_fields = Array.from(insights.field_patterns.pii_fields || []);
 
     return insights;
 }
@@ -334,10 +345,10 @@ function buildLineageGraph(tables) {
     const fieldOccurrences = new Map();
     
     tables.forEach(table => {
-        if (table.schema) {
+        if (table.schema && table.schema.length) {
             table.schema.forEach(field => {
-                const fieldName = field.column_name.toLowerCase();
-                if (!EXCLUDE_AS_JOIN_KEYS.includes(fieldName)) {
+                const fieldName = field.column_name?.toLowerCase();
+                if (fieldName && !EXCLUDE_AS_JOIN_KEYS.includes(fieldName)) {
                     if (!fieldOccurrences.has(fieldName)) {
                         fieldOccurrences.set(fieldName, []);
                     }
@@ -353,9 +364,9 @@ function buildLineageGraph(tables) {
         if (tableList.length > 1) {
             // This field appears in multiple tables - mark as potential join key
             tables.forEach(table => {
-                if (table.schema) {
+                if (table.schema && table.schema.length) {
                     table.schema.forEach(field => {
-                        if (field.column_name.toLowerCase() === fieldName) {
+                        if (field.column_name && field.column_name.toLowerCase() === fieldName) {
                             field.is_potential_join_key = true;
                         }
                     });
@@ -441,15 +452,21 @@ async function runAudit() {
         // Analytics compatibility analysis
         console.log(`\n${colors.yellow}Analyzing tables for analytics compatibility...${colors.nc}`);
         const analyticsInsights = analyzeAnalyticsCompatibility(rawData.tables);
-        console.log(`${colors.green}✓ Analytics analysis complete: ${analyticsInsights.mixpanel_ready.length} Mixpanel-ready tables found.${colors.nc}`);
+        console.log(`${colors.green}✓ Analytics analysis complete: ${analyticsInsights.event_tables.length} EVENT tables found.${colors.nc}`);
 
         // Update lineage graph nodes with analytics scores
         lineageGraph.nodes.forEach(node => {
-            const tableAnalysis = analyticsInsights.data_quality.find(
+            // Find the table analysis from any of the categorized arrays
+            const allAnalyses = [
+                ...analyticsInsights.event_tables,
+                ...analyticsInsights.user_tables, 
+                ...analyticsInsights.lookup_tables
+            ];
+            const tableAnalysis = allAnalyses.find(
                 analysis => analysis.table_name === node.id
             );
             if (tableAnalysis) {
-                node.analytics_score = tableAnalysis.mixpanel_score;
+                node.analytics_score = tableAnalysis.mixpanel_compatibility;
             }
         });
 
@@ -473,6 +490,8 @@ async function runAudit() {
                 generated_at: new Date().toISOString(),
                 analysis_version: "1.0.0",
                 source_file: config.inputFile,
+                project_id: rawData.extraction_metadata?.project_id,
+                dataset_id: rawData.extraction_metadata?.dataset_id,
                 ...rawData.audit_metadata // Include original metadata
             },
             tables: rawData.tables, // Include all raw table data
@@ -486,6 +505,7 @@ async function runAudit() {
         await fs.writeFile(outputFile, JSON.stringify(auditResult, null, 2));
 
         // Write summary CSV
+        
         const auditSummaryCsv = [
             "metric,value",
             `total_tables,${summary.total_tables}`,
@@ -493,9 +513,9 @@ async function runAudit() {
             `total_objects,${summary.total_objects}`,
             `failed_objects,${summary.failed_objects}`,
             `total_rows_accessible,${summary.total_rows_accessible}`,
-            `mixpanel_ready_tables,${analyticsInsights.mixpanel_ready.length}`,
-            `event_tables,${analyticsInsights.event_tables.length}`,
-            `user_tables,${analyticsInsights.user_tables.length}`
+            `mixpanel_ready_tables,${analyticsInsights.event_tables?.length || 0}`,
+            `event_tables,${analyticsInsights.event_tables?.length || 0}`,
+            `user_tables,${analyticsInsights.user_tables?.length || 0}`
         ].join("\n");
         
         await fs.writeFile(
@@ -506,7 +526,7 @@ async function runAudit() {
         console.log(`\n${colors.green}✔ Audit analysis complete!${colors.nc}`);
         console.log("==========================================");
         console.log(`${colors.green}▸ Processed:${colors.nc}        ${rawData.tables.length} tables/views`);
-        console.log(`${colors.green}▸ Mixpanel Ready:${colors.nc}   ${analyticsInsights.mixpanel_ready.length} tables`);
+        console.log(`${colors.green}▸ Event Tables:${colors.nc}     ${analyticsInsights.event_tables.length} tables`);
         console.log(`${colors.green}▸ Join Keys Found:${colors.nc}  ${lineageGraph.edges.filter(e => e.type === 'join_key').length} relationships`);
         console.log(`${colors.green}▸ View Dependencies:${colors.nc} ${lineageGraph.edges.filter(e => e.type === 'view_dependency').length} relationships`);
         console.log("==========================================");
@@ -521,7 +541,6 @@ async function runAudit() {
 
 // Run the audit if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-    const inFile = './allegro'
 	runAudit().catch(console.error);
 }
 

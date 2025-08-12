@@ -29,7 +29,7 @@ dwh-audit is a Node.js command-line tool designed to comprehensively audit data 
 - 📊 **Interactive Mixpanel-themed Reports** - Beautiful dashboards with charts and visualizations  
 - 🔗 **Smart Join Key Detection** - Identifies potential relationships between tables
 - 🌐 **Data Lineage Mapping** - Visual ERD showing table dependencies and relationships
-- 🚀 **Dual Permission Support** - Works with both DataViewer and JobUser roles
+- 🚀 **DataViewer Support** - Works with standard BigQuery DataViewer permissions
 - 📈 **Analytics Readiness Scoring** - Mixpanel compatibility analysis
 - 💾 **Multiple Output Formats** - JSON, CSV, and HTML reports
 - 🏗️ **Modular Architecture** - Fast iteration and multi-warehouse support
@@ -163,14 +163,6 @@ dwh-audit --project my-project --dataset my-dataset --credentials ./service-acco
 
 #### Required Permissions
 
-For **full functionality** (recommended):
-```bash
-gcloud projects add-iam-policy-binding PROJECT_ID \
-  --member="user:your-email@company.com" \
-  --role="roles/bigquery.jobUser"
-```
-
-For **read-only mode**:
 ```bash
 gcloud projects add-iam-policy-binding PROJECT_ID \
   --member="user:your-email@company.com" \

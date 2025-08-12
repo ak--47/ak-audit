@@ -33,14 +33,25 @@
 		"test:integration": "vitest run test/integration.test.js",
 		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser",
 		"serve": "npx serve ./output/reports",
-		"rebuild": "node rebuild.js",
 		"extract": "node bigquery.js",
 		"analyze": "node audit.js",
 		"report": "node rebuild.js",
-		"rebuild:watch": "nodemon rebuild.js",
+		"pipeline:watch": "nodemon --watch audit.js --watch buildReport.js --exec 'node audit.js && node rebuild.js'",
 		"post": "npm publish --access public"
 	},
-	"keywords": ["bigquery", "audit", "data-warehouse", "analytics", "cli", "data-quality", "google-cloud", "schema-analysis", "mixpanel", "typescript", "modular"],
+	"keywords": [
+		"bigquery",
+		"audit",
+		"data-warehouse",
+		"analytics",
+		"cli",
+		"data-quality",
+		"google-cloud",
+		"schema-analysis",
+		"mixpanel",
+		"typescript",
+		"modular"
+	],
 	"author": "ak@mixpanel.com",
 	"license": "MIT",
 	"description": "Modular CLI tool for auditing data warehouses - extract, analyze, and report on schemas, data quality, and analytics readiness",
@@ -50,6 +61,7 @@
 		"yargs": "^18.0.0"
 	},
 	"devDependencies": {
+		"nodemon": "^3.1.10",
 		"vitest": "^3.2.4"
 	}
 }

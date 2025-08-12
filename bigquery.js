@@ -104,6 +104,51 @@ const parseViewDependencies = (ddl, datasetId) => {
 	return Array.from(dependencies);
 };
 
+// Helper function to recursively unwrap BigQuery REST API field values
+function unwrapBigQueryValue(value) {
+	if (value === null || value === undefined) {
+		return null;
+	}
+
+	// Handle arrays (REPEATED fields)
+	if (Array.isArray(value)) {
+		return value.map(item => {
+			if (item && typeof item === 'object' && 'v' in item) {
+				return unwrapBigQueryValue(item.v);
+			}
+			return unwrapBigQueryValue(item);
+		});
+	}
+
+	// Handle objects that might be wrapped values
+	if (typeof value === 'object' && value !== null) {
+		// If it has a 'v' property, unwrap it
+		if ('v' in value) {
+			return unwrapBigQueryValue(value.v);
+		}
+
+		// Handle STRUCT fields (objects with 'f' property containing field array)
+		if ('f' in value && Array.isArray(value.f)) {
+			const struct = {};
+			// This would need schema information to properly name fields
+			// For now, just unwrap the values
+			value.f.forEach((field, index) => {
+				struct[`field_${index}`] = unwrapBigQueryValue(field);
+			});
+			return struct;
+		}
+
+		// Regular object - recursively unwrap all properties
+		const unwrapped = {};
+		for (const [key, val] of Object.entries(value)) {
+			unwrapped[key] = unwrapBigQueryValue(val);
+		}
+		return unwrapped;
+	}
+
+	// Primitive values - return as is
+	return value;
+}
 
 const csvEscape = str => {
 	if (str === null || str === undefined) return "";
@@ -119,36 +164,18 @@ async function testBigQueryAuth() {
 	console.log(`${colors.yellow}Testing BigQuery authentication and connectivity...${colors.nc}`);
 	try {
 		const datasets = await bigquery.getDatasets();
-		console.log(`${colors.green}✓ BigQuery authentication successful.${colors.nc}`);
-
-		// Test if we have query permissions (jobUser role)
-		try {
-			const testQuery = `SELECT 1 as test_col LIMIT 1`;
-			await bigquery.query({
-				query: testQuery,
-				dryRun: true
-			});
-			console.log(`${colors.green}✓ Query permissions available (jobUser role detected).${colors.nc}\n`);
-			return "dataViewer";
-			// return "jobUser";
-		} catch (queryError) {
-			console.log(`${colors.yellow}⚠ Query permissions not available - will use REST API only (dataViewer mode).${colors.nc}\n`);
-			return "dataViewer";
-		}
+		console.log(`${colors.green}✓ BigQuery authentication successful (dataViewer mode).${colors.nc}\n`);
+		return "dataViewer";
 	} catch (error) {
 		if (NODE_ENV === "dev") debugger;
 		console.error(
 			`${colors.red}Fatal Error: BigQuery authentication or connectivity failed. Please check your Google Cloud credentials and network access.${colors.nc}`
 		);
 		console.error(error.message);
-		console.error(`\n${colors.yellow}Try running this command to set up basic permissions:${colors.nc}`);
+		console.error(`\n${colors.yellow}Required permissions:${colors.nc}`);
 		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
 		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
 		console.error(`${colors.cyan}  --role='roles/bigquery.dataViewer'${colors.nc}`);
-		console.error(`\n${colors.yellow}For full functionality, also add:${colors.nc}`);
-		console.error(`${colors.cyan}gcloud projects add-iam-policy-binding ${config.projectId} \\${colors.nc}`);
-		console.error(`${colors.cyan}  --member='user:your_name@yourdomain.com' \\${colors.nc}`);
-		console.error(`${colors.cyan}  --role='roles/bigquery.jobUser'${colors.nc}`);
 		process.exit(1);
 	}
 }
@@ -158,54 +185,81 @@ async function getSampleDataViaREST(projectId, datasetId, tableName, schema, max
 		const authClient = await auth.getClient();
 		const accessToken = await authClient.getAccessToken();
 
+		const url = `https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables/${tableName}/data?maxResults=${maxResults}`;
+
 		return new Promise((resolve, reject) => {
-			const path = `/bigquery/v2/projects/${projectId}/datasets/${datasetId}/tables/${tableName}/data?maxResults=${maxResults}`;
 			const options = {
-				hostname: 'www.googleapis.com',
-				path: path,
-				method: 'GET',
 				headers: {
-					'Authorization': `Bearer ${accessToken.token}`,
-					'Content-Type': 'application/json'
-				}
+					Authorization: `Bearer ${accessToken.token}`,
+					"Content-Type": "application/json"
+				},
+				timeout: 30000 // 30 second timeout
 			};
 
-			const req = https.request(options, (res) => {
-				let data = '';
-				res.on('data', (chunk) => data += chunk);
-				res.on('end', () => {
+			const req = https.get(url, options, res => {
+				let data = "";
+				res.on("data", chunk => (data += chunk));
+				res.on("end", () => {
+					// Check for HTTP error status codes
+					if (res.statusCode < 200 || res.statusCode >= 300) {
+						try {
+							const errorResponse = JSON.parse(data);
+							reject(new Error(`HTTP ${res.statusCode}: ${errorResponse.error ? errorResponse.error.message : res.statusMessage}`));
+						} catch {
+							reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+						}
+						return;
+					}
+
 					try {
-						const result = JSON.parse(data);
-						if (result.error) {
-							reject(new Error(`REST API Error: ${result.error.message}`));
+						const response = JSON.parse(data);
+						if (response.error) {
+							reject(new Error(`BigQuery API Error: ${response.error.message}`));
 							return;
 						}
 
-						// Transform BigQuery REST API response to match our expected format
-						const rows = (result.rows || []).map(row => {
-							const rowObj = {};
-							(row.f || []).forEach((field, index) => {
-								if (schema && schema[index]) {
-									rowObj[schema[index].column_name] = field.v;
-								} else {
-									rowObj[`column_${index}`] = field.v;
-								}
-							});
-							return rowObj;
-						});
+						if (response.rows && response.rows.length > 0) {
+							// Convert BigQuery REST API format to standard row format
+							// Use the schema passed as parameter since the data API doesn't include schema
+							const rows = response.rows.map(row => {
+								const obj = {};
+								if (row.f && Array.isArray(row.f)) {
+									row.f.forEach((field, index) => {
+										if (schema && schema[index]) {
+											const fieldName = schema[index].column_name || schema[index].name;
 
-						resolve(rows);
+											// Handle null/undefined values
+											if (field.v === null || field.v === undefined) {
+												obj[fieldName] = null;
+											} else {
+												// Properly unwrap nested/repeated field values
+												obj[fieldName] = unwrapBigQueryValue(field.v);
+											}
+										}
+									});
+								}
+								return obj;
+							});
+							resolve(rows);
+						} else {
+							resolve([]);
+						}
 					} catch (parseError) {
 						reject(new Error(`Failed to parse REST API response: ${parseError.message}`));
 					}
 				});
 			});
 
-			req.on('error', (error) => {
+			req.on("error", error => {
 				reject(new Error(`REST API request failed: ${error.message}`));
 			});
 
-			req.end();
+			req.on("timeout", () => {
+				req.destroy();
+				reject(new Error("REST API request timed out after 30 seconds"));
+			});
+
+			req.setTimeout(30000);
 		});
 	} catch (error) {
 		throw new Error(`REST API authentication failed: ${error.message}`);
@@ -318,174 +372,6 @@ async function getTableSchemaViaREST(projectId, datasetId, tableName) {
 	return metadata.schema;
 }
 
-async function getSampleDataViaJobsAPI(projectId, datasetId, tableName, maxResults = 10) {
-	try {
-		const authClient = await auth.getClient();
-		const accessToken = await authClient.getAccessToken();
-
-		// Create a query job to sample data from the view
-		const jobConfig = {
-			configuration: {
-				query: {
-					query: `SELECT * FROM \`${projectId}.${datasetId}.${tableName}\` LIMIT ${maxResults}`,
-					useLegacySql: false
-				}
-			}
-		};
-
-		// Submit the job
-		const jobResponse = await new Promise((resolve, reject) => {
-			const postData = JSON.stringify(jobConfig);
-			const options = {
-				hostname: 'www.googleapis.com',
-				path: `/bigquery/v2/projects/${projectId}/jobs`,
-				method: 'POST',
-				headers: {
-					'Authorization': `Bearer ${accessToken.token}`,
-					'Content-Type': 'application/json',
-					'Content-Length': Buffer.byteLength(postData)
-				}
-			};
-
-			const req = https.request(options, (res) => {
-				let data = '';
-				res.on('data', (chunk) => data += chunk);
-				res.on('end', () => {
-					try {
-						const result = JSON.parse(data);
-						if (result.error) {
-							reject(new Error(`Jobs API Error: ${result.error.message}`));
-							return;
-						}
-						resolve(result);
-					} catch (parseError) {
-						reject(new Error(`Failed to parse Jobs API response: ${parseError.message}`));
-					}
-				});
-			});
-
-			req.on('error', (error) => {
-				reject(new Error(`Jobs API request failed: ${error.message}`));
-			});
-
-			req.write(postData);
-			req.end();
-		});
-
-		const jobId = jobResponse.jobReference.jobId;
-
-		// Wait for job completion and get results
-		let jobComplete = false;
-		let attempts = 0;
-		const maxAttempts = 30; // 30 seconds timeout
-
-		while (!jobComplete && attempts < maxAttempts) {
-			await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-			attempts++;
-
-			const statusResponse = await new Promise((resolve, reject) => {
-				const options = {
-					hostname: 'www.googleapis.com',
-					path: `/bigquery/v2/projects/${projectId}/jobs/${jobId}`,
-					method: 'GET',
-					headers: {
-						'Authorization': `Bearer ${accessToken.token}`,
-						'Content-Type': 'application/json'
-					}
-				};
-
-				const req = https.request(options, (res) => {
-					let data = '';
-					res.on('data', (chunk) => data += chunk);
-					res.on('end', () => {
-						try {
-							const result = JSON.parse(data);
-							if (result.error) {
-								reject(new Error(`Jobs API Error: ${result.error.message}`));
-								return;
-							}
-							resolve(result);
-						} catch (parseError) {
-							reject(new Error(`Failed to parse Jobs API response: ${parseError.message}`));
-						}
-					});
-				});
-
-				req.on('error', (error) => {
-					reject(new Error(`Jobs API request failed: ${error.message}`));
-				});
-
-				req.end();
-			});
-
-			jobComplete = statusResponse.status && statusResponse.status.state === 'DONE';
-
-			if (jobComplete) {
-				if (statusResponse.status.errorResult) {
-					throw new Error(`Query failed: ${statusResponse.status.errorResult.message}`);
-				}
-
-				// Get query results
-				const resultsResponse = await new Promise((resolve, reject) => {
-					const options = {
-						hostname: 'www.googleapis.com',
-						path: `/bigquery/v2/projects/${projectId}/queries/${jobId}?maxResults=${maxResults}`,
-						method: 'GET',
-						headers: {
-							'Authorization': `Bearer ${accessToken.token}`,
-							'Content-Type': 'application/json'
-						}
-					};
-
-					const req = https.request(options, (res) => {
-						let data = '';
-						res.on('data', (chunk) => data += chunk);
-						res.on('end', () => {
-							try {
-								const result = JSON.parse(data);
-								if (result.error) {
-									reject(new Error(`Jobs API Error: ${result.error.message}`));
-									return;
-								}
-								resolve(result);
-							} catch (parseError) {
-								reject(new Error(`Failed to parse Jobs API response: ${parseError.message}`));
-							}
-						});
-					});
-
-					req.on('error', (error) => {
-						reject(new Error(`Jobs API request failed: ${error.message}`));
-					});
-
-					req.end();
-				});
-
-				// Transform results to match our expected format
-				const rows = (resultsResponse.rows || []).map(row => {
-					const rowObj = {};
-					(row.f || []).forEach((field, index) => {
-						if (resultsResponse.schema && resultsResponse.schema.fields && resultsResponse.schema.fields[index]) {
-							rowObj[resultsResponse.schema.fields[index].name] = field.v;
-						} else {
-							rowObj[`column_${index}`] = field.v;
-						}
-					});
-					return rowObj;
-				});
-
-				return rows;
-			}
-		}
-
-		if (!jobComplete) {
-			throw new Error('Query job timed out');
-		}
-
-	} catch (error) {
-		throw new Error(`Jobs API query failed: ${error.message}`);
-	}
-}
 
 async function runDataExtraction() {
 	const permissionMode = await testBigQueryAuth();
@@ -496,7 +382,7 @@ async function runDataExtraction() {
 	console.log(`${colors.green}▸ Region:${colors.nc}           ${config.location}`);
 	console.log(`${colors.green}▸ Table Filter:${colors.nc}    ${config.tableFilter ? config.tableFilter.join(", ") : "All tables"}`);
 	console.log(`${colors.green}▸ Sample Limit:${colors.nc}     ${config.sampleLimit}`);
-	console.log(`${colors.green}▸ Permission Mode:${colors.nc}  ${permissionMode === "jobUser" ? "JobUser (query access)" : "DataViewer (REST API only)"}`);
+	console.log(`${colors.green}▸ Permission Mode:${colors.nc}  DataViewer (REST API only)`);
 	console.log(`${colors.green}▸ Output Directory:${colors.nc} ${config.outputDir}`);
 	console.log("-------------------------------------------\n");
 
@@ -542,32 +428,8 @@ async function runDataExtraction() {
 	
 	let tables;
 	try {
-		if (permissionMode === "jobUser") {
-			// Use SQL query to get comprehensive metadata
-			const tablesQuery = `
-				SELECT 
-					table_name,
-					table_type,
-					creation_time,
-					-- row_count, 
-					size_bytes,
-					EXTRACT(DATE FROM TIMESTAMP_MILLIS(creation_time)) as creation_date
-				FROM \`${config.projectId}.${config.datasetId}.INFORMATION_SCHEMA.TABLES\`
-				ORDER BY table_name
-			`;
-
-			const [rows] = await bigquery.query({ query: tablesQuery });
-			tables = rows.map(row => ({
-				table_name: row.table_name,
-				table_type: row.table_type,
-				creation_time: row.creation_time ? row.creation_time.toISOString() : null,
-				row_count: row.row_count ? parseInt(row.row_count) : null,
-				size_bytes: row.size_bytes ? parseInt(row.size_bytes) : null
-			}));
-		} else {
-			// Use REST API
-			tables = await getTablesViaREST(config.projectId, config.datasetId);
-		}
+		// Use REST API (dataViewer mode)
+		tables = await getTablesViaREST(config.projectId, config.datasetId);
 
 		// Apply table filtering if specified
 		if (config.tableFilter && config.tableFilter.length > 0) {
@@ -610,133 +472,100 @@ async function runDataExtraction() {
 		};
 
 		try {
-			// Get schema information
-			if (permissionMode === "jobUser") {
-				// Get detailed schema with COLUMN_FIELD_PATHS for nested fields (includes all subfields)
-				const formattedRegion = formatRegion(config.location);
-				const schemaQuery = `
-					SELECT 
-						cfp.column_name,
-						cfp.ordinal_position,
-						cfp.field_path AS nested_field_path,
-						cfp.data_type AS nested_type,
-						COALESCE(c.is_nullable, 'YES') as is_nullable,
-						COALESCE(c.is_partitioning_column, 'NO') as is_partitioning_column,
-						c.clustering_ordinal_position
-					FROM \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS\` cfp
-					LEFT JOIN \`${config.projectId}.${formattedRegion}.INFORMATION_SCHEMA.COLUMNS\` c
-						ON cfp.table_catalog = c.table_catalog 
-						AND cfp.table_schema = c.table_schema 
-						AND cfp.table_name = c.table_name 
-						AND cfp.column_name = c.column_name
-					WHERE cfp.table_name = @tableName AND cfp.table_schema = @datasetId
-					ORDER BY cfp.ordinal_position, cfp.field_path
-				`;
-
-				const [schemaRows] = await bigquery.query({
-					query: schemaQuery,
-					params: { 
-						tableName: tableName,
-						datasetId: config.datasetId
-					}
-				});
-
-				tableData.schema = schemaRows.map(row => ({
-					column_name: row.column_name,
-					ordinal_position: row.ordinal_position,
-					is_nullable: row.is_nullable,
-					data_type: row.nested_type, // Use the specific data_type from COLUMN_FIELD_PATHS
-					is_partitioning_column: row.is_partitioning_column === 'YES',
-					clustering_ordinal_position: row.clustering_ordinal_position,
-					nested_field_path: row.nested_field_path || row.column_name,
-					nested_type: row.nested_type
-				}));
-
-			} else {
-				// Use REST API to get schema - extract nested fields recursively
-				const metadata = await getTableMetadataViaREST(config.projectId, config.datasetId, tableName);
+			// Get schema information via REST API
+			const metadata = await getTableMetadataViaREST(config.projectId, config.datasetId, tableName);
+			
+			if (metadata.schema && metadata.schema.fields) {
+				// Recursively flatten nested fields from REST API response
+				const schema = [];
 				
-				if (metadata.schema && metadata.schema.fields) {
-					// Recursively flatten nested fields from REST API response
-					const flattenFields = (fields, parentPath = '', ordinalStart = 1) => {
-						const result = [];
-						let ordinal = ordinalStart;
-						
-						for (const field of fields) {
-							const fieldPath = parentPath ? `${parentPath}.${field.name}` : field.name;
-							
-							// Add the field itself
-							result.push({
-								column_name: parentPath ? parentPath.split('.')[0] : field.name,
-								ordinal_position: ordinal,
-								is_nullable: field.mode !== 'REQUIRED' ? 'YES' : 'NO',
-								data_type: field.type,
-								is_partitioning_column: false,
-								clustering_ordinal_position: null,
-								nested_field_path: fieldPath,
-								nested_type: field.type
-							});
-							
-							// If this field has nested fields (STRUCT/RECORD), add them recursively
-							if (field.fields && field.fields.length > 0) {
-								const nestedFields = flattenFields(field.fields, fieldPath, ordinal);
-								result.push(...nestedFields);
-							}
-							
-							ordinal++;
+				function processFields(fields, parentPath = "") {
+					fields.forEach(field => {
+						const fieldPath = parentPath ? `${parentPath}.${field.name}` : field.name;
+						schema.push({
+							column_name: field.name,
+							ordinal_position: schema.length + 1,
+							is_nullable: field.mode === "NULLABLE" ? "YES" : "NO",
+							data_type: field.type,
+							is_partitioning_column: false,
+							clustering_ordinal_position: null,
+							nested_field_path: fieldPath,
+							nested_type: field.type
+						});
+
+						// Handle nested fields recursively
+						if (field.fields) {
+							processFields(field.fields, fieldPath);
 						}
-						
-						return result;
-					};
-					
-					tableData.schema = flattenFields(metadata.schema.fields);
+					});
 				}
 
-				// Get additional metadata
-				if (metadata.numRows) {
-					tableData.row_count = parseInt(metadata.numRows);
-				}
-				if (metadata.numBytes) {
-					tableData.size_bytes = parseInt(metadata.numBytes);
-				}
-				if (metadata.timePartitioning) {
-					tableData.partitioning_info = metadata.timePartitioning;
-				}
-				if (metadata.clustering) {
-					tableData.clustering_info = metadata.clustering;
-				}
+				processFields(metadata.schema.fields);
+				tableData.schema = schema;
 			}
 
-			// Get sample data
+			// Get additional metadata
+			if (metadata.numRows) {
+				tableData.row_count = parseInt(metadata.numRows);
+			}
+			if (metadata.numBytes) {
+				tableData.size_bytes = parseInt(metadata.numBytes);
+			}
+			if (metadata.timePartitioning) {
+				tableData.partitioning_info = metadata.timePartitioning;
+			}
+			if (metadata.clustering) {
+				tableData.clustering_info = metadata.clustering;
+			}
+
+			// Get sample data via REST API (works for tables) or query (for views/materialized views)
 			if (config.sampleLimit > 0 && tableData.schema.length > 0) {
 				try {
-					if (permissionMode === "jobUser") {
-						// Use SQL query for sampling
-						const sampleQuery = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${tableName}\` LIMIT ${config.sampleLimit}`;
-						const [sampleRows] = await bigquery.query({ query: sampleQuery });
-						tableData.sample_data = sampleRows.map(row => {
-							// Convert BigQuery types to JSON-serializable format
-							const cleanRow = {};
-							Object.keys(row).forEach(key => {
-								const value = row[key];
-								if (value && typeof value === 'object' && value.constructor.name === 'BigQueryDate') {
-									cleanRow[key] = value.value;
-								} else if (value && typeof value === 'object' && value.constructor.name === 'BigQueryTimestamp') {
-									cleanRow[key] = value.value;
-								} else {
-									cleanRow[key] = value;
-								}
+					if (tableInfo.table_type === 'VIEW') {
+						// For views, try using a simple SELECT query instead of the table data endpoint
+						console.log(`   ${colors.cyan}→ Attempting view query for sample data...${colors.nc}`);
+						try {
+							const query = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${tableName}\` LIMIT ${config.sampleLimit}`;
+							const [queryResults] = await bigquery.query({ 
+								query: query, 
+								location: config.location,
+								dryRun: false,
+								maximumBytesBilled: 1000000 // 1MB limit for safety
 							});
-							return cleanRow;
-						});
+							tableData.sample_data = queryResults;
+							console.log(`   ${colors.green}✓ Sample data from view query: ${tableData.sample_data.length} rows${colors.nc}`);
+						} catch (queryError) {
+							console.log(`   ${colors.yellow}⚠ View query failed: ${queryError.message}${colors.nc}`);
+							tableData.error_details.push(`View query failed: ${queryError.message}`);
+							tableData.sample_data = [];
+						}
 					} else {
-						// Use REST API for tables, Jobs API for views in dataViewer mode
-						if (tableInfo.table_type === 'VIEW') {
-							// For views in dataViewer mode, use Jobs API to execute SELECT query
-							tableData.sample_data = await getSampleDataViaJobsAPI(config.projectId, config.datasetId, tableName, config.sampleLimit);
-						} else {
-							// For tables, use direct REST API
+						// For tables, use the REST API table data endpoint
+						try {
 							tableData.sample_data = await getSampleDataViaREST(config.projectId, config.datasetId, tableName, tableData.schema, config.sampleLimit);
+							console.log(`   ${colors.green}✓ Sample data: ${tableData.sample_data.length} rows${colors.nc}`);
+						} catch (restError) {
+							// If REST API fails with materialized view error, fallback to query approach
+							if (restError.message.includes('Cannot list a table of type MATERIALIZED_VIEW')) {
+								console.log(`   ${colors.cyan}→ Detected materialized view, using query approach...${colors.nc}`);
+								try {
+									const query = `SELECT * FROM \`${config.projectId}.${config.datasetId}.${tableName}\` LIMIT ${config.sampleLimit}`;
+									const [queryResults] = await bigquery.query({ 
+										query: query, 
+										location: config.location,
+										dryRun: false,
+										maximumBytesBilled: 50000000 // 50MB limit for materialized views
+									});
+									tableData.sample_data = queryResults;
+									console.log(`   ${colors.green}✓ Sample data from materialized view query: ${tableData.sample_data.length} rows${colors.nc}`);
+								} catch (queryError) {
+									console.log(`   ${colors.yellow}⚠ Materialized view query failed: ${queryError.message}${colors.nc}`);
+									tableData.error_details.push(`Materialized view query failed: ${queryError.message}`);
+									tableData.sample_data = [];
+								}
+							} else {
+								throw restError; // Re-throw other REST API errors
+							}
 						}
 					}
 				} catch (sampleError) {
@@ -745,27 +574,11 @@ async function runDataExtraction() {
 				}
 			}
 
-			// Get view definition for views
+			// Get view definition for views via REST API
 			if (tableInfo.table_type === 'VIEW') {
 				try {
-					if (permissionMode === "jobUser") {
-						const viewQuery = `
-							SELECT view_definition 
-							FROM \`${config.projectId}.${config.datasetId}.INFORMATION_SCHEMA.VIEWS\`
-							WHERE table_name = @tableName
-						`;
-						const [viewRows] = await bigquery.query({
-							query: viewQuery,
-							params: { tableName: tableName }
-						});
-						if (viewRows.length > 0) {
-							tableData.view_definition = viewRows[0].view_definition;
-						}
-					} else {
-						const metadata = await getTableMetadataViaREST(config.projectId, config.datasetId, tableName);
-						if (metadata.view && metadata.view.query) {
-							tableData.view_definition = metadata.view.query;
-						}
+					if (metadata.view && metadata.view.query) {
+						tableData.view_definition = metadata.view.query;
 					}
 				} catch (viewError) {
 					console.log(`   ${colors.yellow}⚠ Could not get view definition: ${viewError.message}${colors.nc}`);
