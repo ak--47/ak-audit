@@ -9,3 +9,6 @@ dataViewer*
 jobUser*
 test-output*
 saved*
+tmp*
+!tmp/.gitkeep
+fetch_demos.sh

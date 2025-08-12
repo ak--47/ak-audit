@@ -146,6 +146,23 @@ function unwrapBigQueryValue(value) {
 		return unwrapped;
 	}
 
+	// Handle potential JSON strings for better display in sample data
+	if (typeof value === 'string' && value.length > 0) {
+		const trimmed = value.trim();
+		// Check if string looks like JSON (starts with { or [)
+		if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+		    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+			try {
+				// Try to parse as JSON
+				const parsed = JSON.parse(trimmed);
+				return parsed; // Return parsed object/array for better display
+			} catch (e) {
+				// If parsing fails, fall back to original string
+				return value;
+			}
+		}
+	}
+
 	// Primitive values - return as is
 	return value;
 }

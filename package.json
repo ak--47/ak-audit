@@ -31,7 +31,7 @@
 		"test": "vitest",
 		"test:run": "vitest run",
 		"test:integration": "vitest run test/integration.test.js",
-		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser",
+		"prune": "rm -rf ./output/* && rm -rf ./dataViewer && rm -rf ./jobUser && rm -rf ./tmp",
 		"serve": "npx serve ./output/reports",
 		"extract": "node bigquery.js",
 		"analyze": "node audit.js",
