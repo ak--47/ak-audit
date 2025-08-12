@@ -104,7 +104,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'd',
     type: 'string',
     default: 'bigquery',
-    description: 'Data warehouse type (currently only "bigquery" supported)',
+    description: 'Data warehouse type (currently only "bigquery" supported, more coming soon)',
     choices: ['bigquery']
   })
   .option('project', {
@@ -149,9 +149,14 @@ const argv = yargs(hideBin(process.argv))
   })
   .help('h')
   .alias('h', 'help')
-  .example('$0 --project my-project --dataset my-dataset', 'Basic audit of a dataset')
+  .example('$0 --project my-project --dataset my-dataset', 'Basic audit of a dataset (full pipeline)')
   .example('$0 --project my-project --dataset my-dataset --filter "users,events*" --samples 25', 'Audit specific tables with more samples')
   .example('$0 --project my-project --dataset my-dataset --credentials ./service-account.json', 'Use specific credentials file')
+  .epilogue('\nPipeline Steps (can also be run individually):\n' +
+           '  node bigquery.js   - Extract raw data from warehouse\n' +
+           '  node audit.js      - Analyze and score extracted data\n' +
+           '  node rebuild.js    - Generate HTML report from analysis\n\n' +
+           'This allows fast iteration on analysis without re-querying the warehouse.')
   .version('1.0.0')
   .wrap(120)
   .argv;
@@ -182,7 +187,7 @@ async function main() {
       throw new Error(`Output directory parent '${outputParent}' does not exist or is not accessible`);
     }
 
-    console.log(`\n${colors.cyan}🔍 BigQuery Dataset Auditor${colors.nc}\n`);
+    console.log(`\n${colors.cyan}🔍 Data Warehouse Auditor (Modular Pipeline)${colors.nc}\n`);
     console.log(`${colors.cyan}Configuration:${colors.nc}`);
     console.log(`  Project ID: ${colors.green}${validatedProject}${colors.nc}`);
     console.log(`  Dataset ID: ${colors.green}${validatedDataset}${colors.nc}`);
@@ -240,31 +245,73 @@ main().then(async (validated) => {
     process.exit(1);
   }
 
-  // Spawn the bigquery.js process with positional arguments
-  const child = spawn('node', [bigqueryPath, ...bigqueryArgs], {
-    stdio: 'inherit',
-    env: process.env
-  });
+  // Run the modular pipeline: extract → analyze → report
+  console.log(`${colors.cyan}🚀 Starting modular audit pipeline...${colors.nc}\n`);
+  
+  // Paths to pipeline components
+  const auditPath = path.resolve(__dirname, '..', 'audit.js');
+  const rebuildPath = path.resolve(__dirname, '..', 'rebuild.js');
 
-  child.on('exit', (code) => {
-    if (code === 0) {
-      console.log(`\n${colors.green}✨ Audit completed successfully!${colors.nc}`);
-      console.log(`${colors.cyan}📁 Find your reports in: ${argv.output}/reports/${colors.nc}`);
-    }
-    process.exit(code || 0);
-  });
-
-  child.on('error', (error) => {
-    console.error(`${colors.red}❌ Failed to start audit: ${error.message}${colors.nc}`);
-    
-    if (error.code === 'ENOENT') {
-      console.error(`${colors.yellow}💡 Node.js may not be in your PATH, or the audit engine is missing${colors.nc}`);
-    }
-    
+  // Check if all pipeline components exist
+  try {
+    await Promise.all([
+      fs.access(auditPath), 
+      fs.access(rebuildPath)
+    ]);
+  } catch (error) {
+    console.error(`${colors.red}❌ Internal Error: Could not find pipeline components${colors.nc}`);
+    console.error(`${colors.yellow}💡 This may indicate a corrupted installation. Try reinstalling dwh-audit.${colors.nc}`);
     process.exit(1);
-  });
+  }
+  
+  try {
+    // Step 1: Data extraction
+    console.log(`${colors.yellow}📊 Step 1/3: Extracting data from BigQuery...${colors.nc}`);
+    await runCommand('node', [bigqueryPath, ...bigqueryArgs]);
+    
+    // Step 2: Analytics analysis
+    console.log(`${colors.yellow}🔍 Step 2/3: Running analytics analysis...${colors.nc}`);
+    await runCommand('node', [auditPath, path.join(argv.output, 'reports', 'dataset_raw.json'), argv.output]);
+    
+    // Step 3: HTML report generation
+    console.log(`${colors.yellow}📊 Step 3/3: Generating HTML report...${colors.nc}`);
+    await runCommand('node', [rebuildPath]);
+    
+    console.log(`\n${colors.green}✨ Complete audit pipeline finished successfully!${colors.nc}`);
+    console.log(`${colors.cyan}📁 Find your reports in: ${argv.output}/reports/${colors.nc}`);
+    console.log(`${colors.cyan}🌐 Open index.html in your browser to view the interactive report${colors.nc}`);
+    console.log(`\n${colors.yellow}🚀 Pro tip: Run individual steps for faster iteration:${colors.nc}`);
+    console.log(`${colors.green}  node audit.js     ${colors.nc} - Re-analyze data (no BigQuery calls)`);
+    console.log(`${colors.green}  node rebuild.js   ${colors.nc} - Just regenerate HTML report`);
+    
+  } catch (error) {
+    console.error(`\n${colors.red}❌ Pipeline failed: ${error.message}${colors.nc}`);
+    process.exit(1);
+  }
 
 }).catch((error) => {
   console.error(`${colors.red}❌ Startup Error: ${error.message}${colors.nc}`);
   process.exit(1);
 });
+
+// Helper function to run commands with proper error handling
+function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env: process.env
+    });
+
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Command '${command} ${args.join(' ')}' exited with code ${code}`));
+      }
+    });
+
+    child.on('error', (error) => {
+      reject(new Error(`Failed to start command '${command}': ${error.message}`));
+    });
+  });
+}

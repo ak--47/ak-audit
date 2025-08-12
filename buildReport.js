@@ -394,6 +394,14 @@ function generateHtmlReport(data) {
             color: var(--chart-color-4); 
             font-weight: 600; 
         }
+        .pii-field-row { 
+            background: rgba(239, 68, 68, 0.12); 
+            border-left: 3px solid var(--error-light);
+        }
+        .pii-field-cell { 
+            color: var(--error-light); 
+            font-weight: 600; 
+        }
         .nested-field-indicator { 
             display: inline-block; 
             margin-left: 8px; 
@@ -634,25 +642,29 @@ function generateHtmlReport(data) {
             
             <!-- Mixpanel Compatibility Cards -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <div class="card" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05)); border-color: rgba(139, 92, 246, 0.3);">
+                <div class="card analytics-card" data-category="mixpanel_ready" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05)); border-color: rgba(139, 92, 246, 0.3); cursor: pointer; transition: all 0.2s ease;">
                     <h3 style="color: var(--accent-purple);">🚀 Mixpanel Ready</h3>
                     <div class="number" style="color: var(--accent-purple);" id="mixpanelReadyCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp + user ID</div>
+                    <div id="mixpanelReadyList" class="table-list" style="display: none; margin-top: 10px; font-size: 0.8rem;"></div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05)); border-color: rgba(16, 185, 129, 0.3);">
+                <div class="card analytics-card" data-category="event_tables" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05)); border-color: rgba(16, 185, 129, 0.3); cursor: pointer; transition: all 0.2s ease;">
                     <h3 style="color: var(--chart-color-3);">📅 Event Tables</h3>
                     <div class="number" style="color: var(--chart-color-3);" id="eventTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with timestamp fields</div>
+                    <div id="eventTablesList" class="table-list" style="display: none; margin-top: 10px; font-size: 0.8rem;"></div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05)); border-color: rgba(245, 158, 11, 0.3);">
+                <div class="card analytics-card" data-category="user_tables" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05)); border-color: rgba(245, 158, 11, 0.3); cursor: pointer; transition: all 0.2s ease;">
                     <h3 style="color: var(--chart-color-4);">👤 User Tables</h3>
                     <div class="number" style="color: var(--chart-color-4);" id="userTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with user identifiers</div>
+                    <div id="userTablesList" class="table-list" style="display: none; margin-top: 10px; font-size: 0.8rem;"></div>
                 </div>
-                <div class="card" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05)); border-color: rgba(239, 68, 68, 0.3);">
+                <div class="card analytics-card" data-category="pii_detected" style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05)); border-color: rgba(239, 68, 68, 0.3); cursor: pointer; transition: all 0.2s ease;">
                     <h3 style="color: var(--error-light);">⚠️ PII Detected</h3>
                     <div class="number" style="color: var(--error-light);" id="piiTablesCount">0</div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">Tables with potential PII</div>
+                    <div id="piiTablesList" class="table-list" style="display: none; margin-top: 10px; font-size: 0.8rem;"></div>
                 </div>
             </div>
             
@@ -806,6 +818,22 @@ function generateHtmlReport(data) {
             const tablesContainer = document.getElementById('tablesContainer');
             const searchInput = document.getElementById('searchInput');
 
+            // Populate header with project/dataset info
+            const projectElement = document.getElementById('headerProject');
+            const datasetElement = document.getElementById('headerDataset');
+            const errorsElement = document.getElementById('headerErrors');
+            
+            if (data.audit_metadata) {
+                projectElement.textContent = data.audit_metadata.project_id || 'Unknown';
+                datasetElement.textContent = data.audit_metadata.dataset_id || 'Unknown';
+            } else if (data.extraction_metadata) {
+                projectElement.textContent = data.extraction_metadata.project_id || 'Unknown';
+                datasetElement.textContent = data.extraction_metadata.dataset_id || 'Unknown';
+            }
+            
+            const errorCount = data.tables ? data.tables.filter(t => t.has_permission_error).length : 0;
+            errorsElement.textContent = errorCount > 0 ? errorCount + ' Errors' : 'No Errors';
+
             // Utility function for human-readable bytes
             const bytesHuman = function (bytes, dp = 2, si = true) {
                 //https://stackoverflow.com/a/14919494
@@ -831,11 +859,7 @@ function generateHtmlReport(data) {
                 document.getElementById('headerProject').textContent = data.audit_metadata.project_id;
                 document.getElementById('headerDataset').textContent = data.audit_metadata.dataset_id;
                 
-                // Add errors to header
-                const errorText = data.summary.failed_objects > 0 ? 
-                    \`Objects with Errors: \${data.summary.failed_objects}\` : 
-                    'No Errors';
-                document.getElementById('headerErrors').textContent = errorText;
+                // Header errors already handled above
                 
                 document.getElementById('summaryTotalObjects').textContent = data.summary.total_objects.toLocaleString();
                 document.getElementById('summaryTables').textContent = data.summary.total_tables.toLocaleString();
@@ -849,8 +873,8 @@ function generateHtmlReport(data) {
                     if (table.row_count && typeof table.row_count === 'number') {
                         totalRows += table.row_count;
                     }
-                    if (table.size_mb && typeof table.size_mb === 'number') {
-                        totalBytes += table.size_mb * 1024 * 1024; // Convert MB to bytes
+                    if (table.size_bytes && typeof table.size_bytes === 'number') {
+                        totalBytes += table.size_bytes; // Already in bytes
                     }
                 });
                 
@@ -859,7 +883,6 @@ function generateHtmlReport(data) {
             }
 
             function renderAnalyticsInsights() {
-                console.log('Analytics data:', data.analytics); // Debug
                 
                 if (!data.analytics) {
                     console.log('No analytics data found');
@@ -872,13 +895,99 @@ function generateHtmlReport(data) {
                 }
                 
                 // Update analytics cards
-                document.getElementById('mixpanelReadyCount').textContent = data.analytics.mixpanel_ready?.length || 0;
-                document.getElementById('eventTablesCount').textContent = data.analytics.event_tables?.length || 0;
-                document.getElementById('userTablesCount').textContent = data.analytics.user_tables?.length || 0;
-                
-                // Count tables with PII
+                const mixpanelReady = data.analytics.data_quality?.filter(t => t.mixpanel_compatibility >= 4) || [];
+                const eventTables = data.analytics.event_tables || [];
+                const userTables = data.analytics.user_tables || [];
                 const piiTables = data.analytics.data_quality?.filter(t => t.data_quality?.potential_pii?.length > 0) || [];
+                
+                document.getElementById('mixpanelReadyCount').textContent = mixpanelReady.length;
+                document.getElementById('eventTablesCount').textContent = eventTables.length;
+                document.getElementById('userTablesCount').textContent = userTables.length;
                 document.getElementById('piiTablesCount').textContent = piiTables.length;
+
+                // Function to create table list
+                function createTableList(tables, containerId) {
+                    const container = document.getElementById(containerId);
+                    if (tables.length === 0) {
+                        container.innerHTML = '<div style="color: var(--text-secondary); font-style: italic;">No tables in this category</div>';
+                        return;
+                    }
+                    
+                    const tableLinks = tables.map((table, index) => {
+                        const scoreSpan = table.mixpanel_compatibility ? 
+                            '<span style="float: right; font-size: 0.7rem; opacity: 0.8;">Score: ' + table.mixpanel_compatibility + '</span>' : '';
+                        const linkId = 'tableLink_' + index;
+                        return '<div id="' + linkId + '" style="margin: 2px 0; padding: 4px 8px; background: rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;" ' +
+                              'data-table-name="' + table.table_name.replace(/"/g, '&quot;') + '" ' +
+                              'onmouseover="this.style.background=&quot;rgba(255,255,255,0.2)&quot;" ' +
+                              'onmouseout="this.style.background=&quot;rgba(255,255,255,0.1)&quot;">' +
+                            '📊 ' + table.table_name +
+                            scoreSpan +
+                        '</div>';
+                    }).join('');
+                    
+                    container.innerHTML = tableLinks;
+                    
+                    // Add event delegation for table links
+                    container.addEventListener('click', function(e) {
+                        const clickedElement = e.target.closest('[data-table-name]');
+                        if (clickedElement) {
+                            const tableName = clickedElement.getAttribute('data-table-name');
+                            scrollToTable(tableName);
+                        }
+                    });
+                }
+
+                // Populate table lists
+                createTableList(mixpanelReady, 'mixpanelReadyList');
+                createTableList(eventTables, 'eventTablesList');
+                createTableList(userTables, 'userTablesList');
+                createTableList(piiTables, 'piiTablesList');
+
+                // Add click handlers for analytics cards
+                document.querySelectorAll('.analytics-card').forEach(card => {
+                    card.addEventListener('click', function() {
+                        const category = this.dataset.category;
+                        const tableList = this.querySelector('.table-list');
+                        
+                        // Toggle visibility
+                        if (tableList.style.display === 'none') {
+                            // Hide all other lists first
+                            document.querySelectorAll('.table-list').forEach(list => list.style.display = 'none');
+                            tableList.style.display = 'block';
+                            this.style.transform = 'scale(1.02)';
+                        } else {
+                            tableList.style.display = 'none';
+                            this.style.transform = 'scale(1)';
+                        }
+                    });
+                    
+                    // Add hover effects
+                    card.addEventListener('mouseenter', function() {
+                        if (this.querySelector('.table-list').style.display !== 'block') {
+                            this.style.transform = 'scale(1.01)';
+                        }
+                    });
+                    
+                    card.addEventListener('mouseleave', function() {
+                        if (this.querySelector('.table-list').style.display !== 'block') {
+                            this.style.transform = 'scale(1)';
+                        }
+                    });
+                });
+
+                // Function to scroll to a specific table
+                window.scrollToTable = function(tableName) {
+                    const tableElement = document.getElementById('table-' + tableName);
+                    if (tableElement) {
+                        tableElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        // Highlight the table briefly
+                        tableElement.style.background = 'rgba(139, 92, 246, 0.1)';
+                        setTimeout(() => {
+                            tableElement.style.background = '';
+                        }, 2000);
+                    }
+                };
                 
                 // Render field patterns
                 renderFieldPatterns();
@@ -971,9 +1080,9 @@ function generateHtmlReport(data) {
                 const qualities = data.analytics.data_quality;
                 
                 // Calculate quality metrics
-                const highQualityTables = qualities.filter(t => t.mixpanel_score >= 4).length;
+                const highQualityTables = qualities.filter(t => t.mixpanel_compatibility >= 4).length;
                 const tablesWithNonNullable = qualities.filter(t => t.data_quality?.unique_fields?.length > 0).length;
-                const avgMixpanelScore = qualities.length > 0 ? qualities.reduce((sum, t) => sum + (t.mixpanel_score || 0), 0) / qualities.length : 0;
+                const avgMixpanelScore = qualities.length > 0 ? qualities.reduce((sum, t) => sum + (t.mixpanel_compatibility || 0), 0) / qualities.length : 0;
                 
                 let html = \`
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -1006,11 +1115,14 @@ function generateHtmlReport(data) {
                 const qualities = data.analytics.data_quality;
                 
                 // Calculate complexity metrics
-                const tablesWithStruct = qualities.filter(t => t.schema_complexity?.struct_fields > 0).length;
-                const tablesWithRepeated = qualities.filter(t => t.schema_complexity?.repeated_fields > 0).length;
-                const tablesWithNested = qualities.filter(t => t.schema_complexity?.nested_fields > 0).length;
+                const tablesWithStruct = qualities.filter(t => t.schema_complexity?.complex_fields && 
+                    t.schema_complexity.complex_fields.some(f => f.type && (f.type.includes('STRUCT') || f.type.includes('RECORD') || f.type.includes('JSON')))).length;
+                const tablesWithRepeated = qualities.filter(t => t.schema_complexity?.complex_fields && 
+                    t.schema_complexity.complex_fields.some(f => f.type && (f.type.includes('REPEATED') || f.type.includes('ARRAY')))).length;
+                const tablesWithNested = qualities.filter(t => t.schema_complexity?.nested_depth > 1).length;
                 const totalComplexFields = qualities.reduce((sum, t) => 
-                    sum + (t.schema_complexity?.struct_fields || 0) + (t.schema_complexity?.repeated_fields || 0), 0);
+                    sum + (t.schema_complexity?.complex_fields?.length || 0), 0);
+                
                 
                 let html = \`
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -1055,15 +1167,46 @@ function generateHtmlReport(data) {
                 const thead = table.createTHead();
                 const tbody = table.createTBody();
                 const headerRow = thead.insertRow();
-                headers.forEach(h => {
+                
+                // Standardize headers for schema tables to ensure consistency
+                let displayHeaders;
+                if (highlightJoinKeys) {
+                    // Use consistent schema table headers for all tables
+                    displayHeaders = [
+                        'column_name',
+                        'ordinal_position', 
+                        'is_nullable',
+                        'data_type',
+                        'nested_field_path',
+                        'nested_type',
+                        'join_key',
+                        'field_type'
+                    ];
+                } else {
+                    displayHeaders = [...headers];
+                }
+                
+                displayHeaders.forEach(h => {
                     const th = document.createElement('th');
                     
                     // Custom header mappings for better display names
                     let displayName = h;
-                    if (h === 'nested_field_path') {
+                    if (h === 'column_name') {
+                        displayName = 'column name';
+                    } else if (h === 'ordinal_position') {
+                        displayName = 'ordinal position';
+                    } else if (h === 'is_nullable') {
+                        displayName = 'is nullable';
+                    } else if (h === 'data_type') {
+                        displayName = 'data type';
+                    } else if (h === 'nested_field_path') {
                         displayName = 'field path';
                     } else if (h === 'nested_type') {
                         displayName = 'type';
+                    } else if (h === 'join_key') {
+                        displayName = 'join key';
+                    } else if (h === 'field_type') {
+                        displayName = 'detected field types';
                     } else {
                         displayName = h.replace(/_/g, ' ');
                     }
@@ -1074,22 +1217,63 @@ function generateHtmlReport(data) {
                 rows.forEach(rowData => {
                     const row = tbody.insertRow();
                     
-                    // Check for complex fields (STRUCT, REPEATED, nested)
+                    // Check for complex fields (STRUCT, REPEATED, nested, JSON)
                     const fieldType = rowData.nested_type || '';
                     const fieldPath = rowData.nested_field_path || rowData.column_name || '';
-                    const isComplex = fieldType.includes('STRUCT') || fieldType.includes('REPEATED') || 
-                                    fieldType.startsWith('ARRAY') || fieldPath.includes('.');
-                    const isJoinKey = highlightJoinKeys && rowData.is_potential_join_key === true;
+                    const fieldName = (rowData.column_name || '').toLowerCase();
                     
-                    if (isComplex) {
-                        row.classList.add('complex-field-row');
-                    } else if (isJoinKey) {
-                        row.classList.add('join-key-row');
+                    const isComplex = fieldType.includes('STRUCT') || fieldType.includes('REPEATED') || 
+                                    fieldType.startsWith('ARRAY') || fieldPath.includes('.') ||
+                                    fieldType.includes('JSON') || fieldType.includes('RECORD');
+                    
+                    // Define Mixpanel-relevant fields
+                    const mixpanelFieldPatterns = [
+                        /^(.*_)?(user|client|customer|device|profile|account|member|person|identity|distinct|anonymous|anon|actor|uid|uuid)(_?)(id|guid|key|identifier)?(_.*)?$/i,
+                        /^(.*_)?(time|timestamp|ts|date|datetime|created|updated|occurred|happened|event_time)(_.*)?$/i,
+                        /^(.*_)?(event|action|activity|type|name|category|kind)(_?)(name|type|category|kind)?(_.*)?$/i,
+                        /^(.*_)?(session|visit|browser|tab)(_?)(id|uuid|key|identifier)?(_.*)?$/i,
+                        /^insert_id$/i,
+                        /^distinct_id$/i
+                    ];
+                    
+                    const isMixpanelField = mixpanelFieldPatterns.some(pattern => pattern.test(fieldName));
+                    
+                    // Check for PII fields based on detected types
+                    const isPIIField = rowData.detected_field_types && 
+                        rowData.detected_field_types.some(type => type.group === 'pii');
+                    
+                    if (isPIIField) {
+                        row.classList.add('pii-field-row'); // Red styling for PII fields
+                    } else if (isComplex) {
+                        row.classList.add('complex-field-row'); // Yellow styling for complex fields (JSON, STRUCT, etc)
+                    } else if (isMixpanelField) {
+                        row.classList.add('join-key-row'); // Reuse the purple styling for Mixpanel fields
                     }
                     
-                    headers.forEach(header => {
+                    displayHeaders.forEach(header => {
                         const cell = row.insertCell();
-                        let value = rowData[header];
+                        let value;
+                        
+                        // Handle the special columns
+                        if (header === 'join_key') {
+                            value = rowData.is_potential_join_key ? '✓' : '';
+                        } else if (header === 'field_type') {
+                            // Format detected field types as comma-separated list
+                            if (rowData.detected_field_types && rowData.detected_field_types.length > 0) {
+                                value = rowData.detected_field_types
+                                    .map(typeInfo => {
+                                        const typeName = typeInfo.type.replace(/_/g, ' ');
+                                        const groupName = typeInfo.group;
+                                        return typeName + ' (' + groupName + ')';
+                                    })
+                                    .join(', ');
+                            } else {
+                                value = '';
+                            }
+                        } else {
+                            // Get value from rowData, default to empty string if not found
+                            value = rowData[header] || '';
+                        }
                         
                         if (typeof value === 'object' && value !== null) {
                             cell.textContent = JSON.stringify(value);
@@ -1118,9 +1302,39 @@ function generateHtmlReport(data) {
                             }
                         }
                         
-                        // Highlight join key cells
-                        if (isJoinKey && (header === 'column_name' || header === 'nested_field_path')) {
-                            cell.classList.add('join-key-cell');
+                        // Highlight Mixpanel field names
+                        if (isMixpanelField && (header === 'column_name' || header === 'nested_field_path')) {
+                            cell.classList.add('join-key-cell'); // Reuse purple styling for Mixpanel fields
+                        }
+                        
+                        // Make nested field paths more prominent by showing the full path
+                        if (header === 'nested_field_path' && value && value.includes('.')) {
+                            cell.style.fontFamily = 'var(--font-mono)';
+                            cell.style.fontSize = '0.85em';
+                            cell.style.fontWeight = '600';
+                        }
+                        
+                        // Style the join key column
+                        if (header === 'join_key' && rowData.is_potential_join_key) {
+                            cell.style.color = 'var(--chart-color-3)';
+                            cell.style.fontWeight = '600';
+                            cell.style.textAlign = 'center';
+                        }
+                        
+                        // Style the field type column
+                        if (header === 'field_type') {
+                            cell.style.fontSize = '0.75rem';
+                            cell.style.fontFamily = 'var(--font-mono)';
+                            cell.style.color = 'var(--text-secondary)';
+                            cell.style.width = '180px';
+                            cell.style.maxWidth = '180px';
+                            cell.style.minWidth = '150px';
+                            cell.style.wordWrap = 'break-word';
+                            cell.style.whiteSpace = 'normal';
+                            cell.style.lineHeight = '1.3';
+                            cell.style.padding = '12px 16px';
+                            cell.style.verticalAlign = 'top';
+                            cell.style.textAlign = 'left';
                         }
                     });
                 });
@@ -1139,18 +1353,20 @@ function generateHtmlReport(data) {
                     
                     // Get analytics insights for this table
                     const analytics = data.analytics ? data.analytics.data_quality.find(a => a.table_name === table.table_name) : null;
-                    const mixpanelBadge = analytics && analytics.mixpanel_score >= 4 ? \`<div class="badge" style="background: rgba(139, 92, 246, 0.15); color: var(--accent-purple);">🚀 Mixpanel Ready</div>\` : '';
+                    const mixpanelBadge = analytics && analytics.mixpanel_compatibility >= 4 ? \`<div class="badge" style="background: rgba(139, 92, 246, 0.15); color: var(--accent-purple);">🚀 Mixpanel Ready</div>\` : '';
                     const piiWarning = analytics && analytics.data_quality.potential_pii.length > 0 ? \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--error-light);">⚠️ PII</div>\` : '';
-                    const qualityScore = analytics ? \`<div class="badge" style="background: rgba(7, 176, 150, 0.15); color: var(--chart-color-3);">Score: \${analytics.mixpanel_score}/10</div>\` : '';
+                    const qualityScore = analytics ? \`<div class="badge" style="background: rgba(7, 176, 150, 0.15); color: var(--chart-color-3);">Score: \${analytics.mixpanel_compatibility}/10</div>\` : '';
                     
                     // Schema complexity badges
                     let complexityBadge = '';
                     if (analytics && analytics.schema_complexity) {
                         const complexity = analytics.schema_complexity;
-                        const hasComplexFields = complexity.struct_fields > 0 || complexity.repeated_fields > 0 || complexity.nested_fields > 0;
+                        const hasComplexFields = complexity.complex_fields && complexity.complex_fields.length > 0;
                         if (hasComplexFields) {
-                            const complexityCount = complexity.struct_fields + complexity.repeated_fields;
-                            complexityBadge = \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--error-light);" title="STRUCT: \${complexity.struct_fields}, REPEATED: \${complexity.repeated_fields}, NESTED: \${complexity.nested_fields}">🏗️ Complex (\${complexityCount})</div>\`;
+                            const structCount = complexity.complex_fields.filter(f => f.type && (f.type.includes('STRUCT') || f.type.includes('RECORD') || f.type.includes('JSON'))).length;
+                            const repeatedCount = complexity.complex_fields.filter(f => f.type && (f.type.includes('REPEATED') || f.type.includes('ARRAY'))).length;
+                            const totalComplexCount = complexity.complex_fields.length;
+                            complexityBadge = \`<div class="badge" style="background: rgba(255, 117, 87, 0.15); color: var(--error-light);" title="STRUCT/RECORD/JSON: \${structCount}, REPEATED/ARRAY: \${repeatedCount}, NESTED: \${complexity.nested_depth}">🏗️ Complex (\${totalComplexCount})</div>\`;
                         }
                     }
                     
@@ -1169,8 +1385,14 @@ function generateHtmlReport(data) {
                     }
                     let schemaHtml = '';
                     if (table.schema && table.schema.length > 0) {
-                        const schemaHeaders = Object.keys(table.schema[0]);
-                        schemaHtml = createTable(schemaHeaders, table.schema, true);
+                        // Sort schema fields by ordinal position to ensure proper order
+                        const sortedSchema = [...table.schema].sort((a, b) => (a.ordinal_position || 0) - (b.ordinal_position || 0));
+                        // Filter out clustering column to save space
+                        const allHeaders = Object.keys(table.schema[0]);
+                        const schemaHeaders = allHeaders.filter(h => h !== 'clustering_ordinal_position');
+                        
+                        
+                        schemaHtml = createTable(schemaHeaders, sortedSchema, true);
                     } else if (table.schema_error) {
                         schemaHtml = \`<div class="error-message">\${table.schema_error}</div>\`;
                     }
@@ -1197,54 +1419,53 @@ function generateHtmlReport(data) {
                         });
                         
                         // Show JSON format for sample data with better formatting
-                        sampleHtml = \`<div class="sample-json">\${JSON.stringify(cleanSampleData, null, 2)}</div>\`;
+                        sampleHtml = '<div class="sample-json">' + JSON.stringify(cleanSampleData, null, 2) + '</div>';
                     } else if (table.sample_data_error) {
-                        sampleHtml = \`<div class="error-message">\${table.sample_data_error}</div>\`;
+                        sampleHtml = '<div class="error-message">' + table.sample_data_error + '</div>';
                     } else {
                         sampleHtml = '<p>No sample data available.</p>';
                     }
-                    const viewDefHtml = table.table_type === 'VIEW' && table.view_definition ? \`<h4>View Definition</h4><pre>\${table.view_definition.replace(/\\\\n/g, '\\n')}</pre>\` : '';
-                    html += \`
-                        <div class="table-item" data-name="\${table.table_name.toLowerCase()}" data-analytics='\${JSON.stringify(analytics || {})}'>
-                            <div class="table-header">
-                                <span class="table-name">
-                                    <svg class="expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                    \${table.table_name}
-                                </span>
-                                <div class="badges">
-                                    <div class="badge \${typeClass}">\${table.table_type}</div>
-                                    \${mixpanelBadge}
-                                    \${piiWarning}
-                                    \${qualityScore}
-                                    \${complexityBadge}
-                                    \${freshnessBadge}
-                                    \${errorBadge}
-                                </div>
-                            </div>
-                            <div class="details">
-                                <div class="details-grid">
-                                    <div class="detail-item"><strong>Rows</strong> <span>\${formatValue(table.row_count)}</span></div>
-                                    <div class="detail-item"><strong>Columns</strong> <span>\${formatValue(table.schema?.length)}</span></div>
-                                    <div class="detail-item"><strong>Size (MB)</strong> <span>\${formatValue(table.size_mb)}</span></div>
-                                    <div class="detail-item"><strong>Partitions</strong> <span>\${table.partition_info ? table.partition_info.length : 0}</span></div>
-                                    <div class="detail-item"><strong>Created (UTC)</strong> <span>\${table.creation_time}</span></div>
-                                    \${table.has_permission_error ? \`<div class="detail-item"><strong>Errors On</strong> <span>\${table.error_details.join(', ')}</span></div>\` : ''}
-                                </div>
-                                \${viewDefHtml}
-                                <h4>Schema</h4>
-                                \${schemaHtml}
-                                <div class="sample-section">
-                                    <h4 class="sample-toggle" style="cursor: pointer; display: flex; align-items: center; user-select: none;">
-                                        <svg class="sample-expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px; transition: transform 0.2s ease;"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                        Sample Data (10 rows)
-                                    </h4>
-                                    <div class="sample-content" style="display: none; margin-top: 10px;">
-                                        \${sampleHtml}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    \`;
+                    const viewDefHtml = table.table_type === 'VIEW' && table.view_definition ? 
+                        '<h4>View Definition</h4><pre>' + table.view_definition.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>' : '';
+                    html += '<div id="table-' + table.table_name + '" class="table-item" data-name="' + table.table_name.toLowerCase() + '" data-analytics="' + JSON.stringify(analytics || {}).replace(/"/g, '&quot;') + '">' +
+                        '<div class="table-header">' +
+                            '<span class="table-name">' +
+                                '<svg class="expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                                table.table_name +
+                            '</span>' +
+                            '<div class="badges">' +
+                                '<div class="badge ' + typeClass + '">' + table.table_type + '</div>' +
+                                mixpanelBadge +
+                                piiWarning +
+                                qualityScore +
+                                complexityBadge +
+                                freshnessBadge +
+                                errorBadge +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="details">' +
+                            '<div class="details-grid">' +
+                                '<div class="detail-item"><strong>Rows</strong> <span>' + formatValue(table.row_count) + '</span></div>' +
+                                '<div class="detail-item"><strong>Columns</strong> <span>' + formatValue(table.schema?.length) + '</span></div>' +
+                                '<div class="detail-item"><strong>Size (MB)</strong> <span>' + formatValue(table.size_bytes ? Math.round(table.size_bytes / (1024 * 1024) * 100) / 100 : 0) + '</span></div>' +
+                                '<div class="detail-item"><strong>Partitions</strong> <span>' + (table.partition_info ? table.partition_info.length : 0) + '</span></div>' +
+                                '<div class="detail-item"><strong>Created (UTC)</strong> <span>' + table.creation_time + '</span></div>' +
+                                (table.has_permission_error ? '<div class="detail-item"><strong>Errors On</strong> <span>' + table.error_details.join(', ') + '</span></div>' : '') +
+                            '</div>' +
+                            viewDefHtml +
+                            '<h4>Schema</h4>' +
+                            schemaHtml +
+                            '<div class="sample-section">' +
+                                '<h4 class="sample-toggle" style="cursor: pointer; display: flex; align-items: center; user-select: none;">' +
+                                    '<svg class="sample-expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px; transition: transform 0.2s ease;"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                                    'Sample Data (10 rows)' +
+                                '</h4>' +
+                                '<div class="sample-content" style="display: none; margin-top: 10px;">' +
+                                    sampleHtml +
+                                '</div>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
                 }
                 tablesContainer.innerHTML = html;
             }
@@ -1342,19 +1563,19 @@ function generateHtmlReport(data) {
                         if (filterType) {
                             switch (filterType) {
                                 case 'mixpanel_ready':
-                                    passesAnalyticsFilter = analyticsData.mixpanel_score >= 4;
+                                    passesAnalyticsFilter = analyticsData.mixpanel_compatibility >= 4;
                                     break;
                                 case 'event_tables':
-                                    passesAnalyticsFilter = analyticsData.analytics_features?.has_timestamp;
+                                    passesAnalyticsFilter = analyticsData.required_fields?.has_timestamp;
                                     break;
                                 case 'user_tables':
-                                    passesAnalyticsFilter = analyticsData.analytics_features?.has_user_id;
+                                    passesAnalyticsFilter = analyticsData.required_fields?.has_user_id;
                                     break;
                                 case 'has_pii':
                                     passesAnalyticsFilter = analyticsData.data_quality?.potential_pii?.length > 0;
                                     break;
                                 case 'high_quality':
-                                    passesAnalyticsFilter = analyticsData.mixpanel_score >= 6;
+                                    passesAnalyticsFilter = analyticsData.mixpanel_compatibility >= 6;
                                     break;
                                 case 'partitioned':
                                     const table = data.tables.find(t => t.table_name.toLowerCase() === tableName);
@@ -1367,10 +1588,14 @@ function generateHtmlReport(data) {
                                     passesAnalyticsFilter = analyticsData.data_freshness && analyticsData.data_freshness.newest_record_days_ago > 30;
                                     break;
                                 case 'complex_schema':
-                                    passesAnalyticsFilter = analyticsData.schema_complexity && (analyticsData.schema_complexity.nested_fields > 0 || analyticsData.schema_complexity.repeated_fields > 0 || analyticsData.schema_complexity.struct_fields > 0);
+                                    passesAnalyticsFilter = analyticsData.schema_complexity && 
+                                        (analyticsData.schema_complexity.nested_depth > 1 || 
+                                         (analyticsData.schema_complexity.complex_fields && analyticsData.schema_complexity.complex_fields.length > 0));
                                     break;
                                 case 'simple_schema':
-                                    passesAnalyticsFilter = !analyticsData.schema_complexity || (analyticsData.schema_complexity.nested_fields === 0 && analyticsData.schema_complexity.repeated_fields === 0 && analyticsData.schema_complexity.struct_fields === 0);
+                                    passesAnalyticsFilter = !analyticsData.schema_complexity || 
+                                        (analyticsData.schema_complexity.nested_depth <= 1 && 
+                                         (!analyticsData.schema_complexity.complex_fields || analyticsData.schema_complexity.complex_fields.length === 0));
                                     break;
                             }
                         }
@@ -1428,7 +1653,7 @@ function generateHtmlReport(data) {
                             const table = data.tables.find(t => t.table_name.toLowerCase() === tableName);
                             if (table) {
                                 totalRows += table.row_count || 0;
-                                totalSize += table.size_mb || 0;
+                                totalSize += table.size_bytes ? table.size_bytes / (1024 * 1024) : 0;
                             }
                         }
                     });
@@ -1549,7 +1774,7 @@ function generateHtmlReport(data) {
                     // Analytics Readiness Score Distribution
                     const scoreRanges = { '0-2': 0, '3-4': 0, '5-6': 0, '7-8': 0, '9-10': 0 };
                     data.analytics.data_quality.forEach(function(table) {
-                        const score = table.mixpanel_score;
+                        const score = table.mixpanel_compatibility;
                         if (score <= 2) scoreRanges['0-2']++;
                         else if (score <= 4) scoreRanges['3-4']++;
                         else if (score <= 6) scoreRanges['5-6']++;
@@ -1874,6 +2099,8 @@ function generateHtmlReport(data) {
                             selectedTables.delete(node.id);
                         }
                         renderInteractiveNetworkDiagram();
+                        // Update analysis panel when selection changes
+                        updateGlobalAnalysis();
                     });
                     
                     const label = document.createElement('label');
@@ -1904,6 +2131,7 @@ function generateHtmlReport(data) {
                             if (checkbox) checkbox.checked = true;
                         });
                         renderInteractiveNetworkDiagram();
+                        updateGlobalAnalysis();
                     });
                 }
                 
@@ -1915,6 +2143,7 @@ function generateHtmlReport(data) {
                             if (checkbox) checkbox.checked = false;
                         });
                         renderInteractiveNetworkDiagram();
+                        updateGlobalAnalysis();
                     });
                 }
                 
@@ -1980,12 +2209,12 @@ function generateHtmlReport(data) {
                     return;
                 }
                 
-                // Create a cleaner force simulation with filtered data
+                // Create a cleaner force simulation with filtered data (more compact/zoomed in)
                 const simulation = d3.forceSimulation(filteredNodes)
-                    .force('link', d3.forceLink(filteredEdges).id(function(d) { return d.id; }).distance(100).strength(0.5))
-                    .force('charge', d3.forceManyBody().strength(-300))
+                    .force('link', d3.forceLink(filteredEdges).id(function(d) { return d.id; }).distance(80).strength(0.7))
+                    .force('charge', d3.forceManyBody().strength(-500))
                     .force('center', d3.forceCenter(width / 2, height / 2))
-                    .force('collision', d3.forceCollide().radius(30));
+                    .force('collision', d3.forceCollide().radius(40));
                 
                 // Add links
                 const links = g.append('g')
@@ -2032,28 +2261,29 @@ function generateHtmlReport(data) {
                             d.fy = null;
                         }));
                 
-                // Add circles
+                // Add circles (make them bigger for better readability)
                 nodes.append('circle')
-                    .attr('r', function(d) { return Math.max(12, Math.min(20, Math.sqrt(d.row_count / 10000))); })
+                    .attr('r', function(d) { return Math.max(18, Math.min(30, Math.sqrt(d.row_count / 5000))); })
                     .attr('fill', function(d) { return d.type === 'VIEW' ? 'var(--chart-color-3)' : 'var(--chart-color-1)'; })
-                    .attr('stroke', 'white')
-                    .attr('stroke-width', 2)
-                    .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
+                    .attr('stroke', 'var(--bg-primary)')
+                    .attr('stroke-width', 3)
+                    .style('filter', 'drop-shadow(0 3px 6px rgba(0,0,0,0.4))');
                 
-                // Add labels
+                // Add labels with better readability
                 const labels = nodes.append('text')
                     .attr('text-anchor', 'middle')
                     .attr('dy', '0.3em')
-                    .attr('font-size', '9px')
-                    .attr('font-weight', '600')
-                    .attr('fill', 'white')
+                    .attr('font-size', '11px')
+                    .attr('font-weight', '700')
+                    .attr('fill', 'var(--text-primary)')
                     .style('pointer-events', 'none')
-                    .text(function(d) { return d.id.length > 8 ? d.id.substring(0, 8) + '...' : d.id; });
+                    .style('text-shadow', '1px 1px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8), 1px -1px 2px rgba(0,0,0,0.8), -1px 1px 2px rgba(0,0,0,0.8)')
+                    .text(function(d) { return d.id; });
                 
                 // Add interaction handlers
                 nodes.on('mouseover', function(event, d) {
                         tooltip.style('opacity', 1)
-                            .html('<strong>' + d.id + '</strong><br/>Type: ' + d.type + '<br/>Rows: ' + d.row_count.toLocaleString() + '<br/>Size: ' + (d.size_mb || 0) + ' MB')
+                            .html('<strong>' + d.id + '</strong><br/>Type: ' + d.type + '<br/>Rows: ' + d.row_count.toLocaleString() + '<br/>Size: ' + (d.size_bytes ? Math.round(d.size_bytes / (1024 * 1024) * 100) / 100 : 0) + ' MB')
                             .style('left', (event.pageX + 10) + 'px')
                             .style('top', (event.pageY - 10) + 'px');
                     })
@@ -2153,7 +2383,86 @@ function generateHtmlReport(data) {
                     
                     html += '</div>';
                     document.getElementById('selectedNodeInfo').innerHTML = html;
+                    
+                    // Update the global analysis based on all selected tables
+                    updateGlobalAnalysis();
                 }
+            }
+            
+            // Global function to analyze and display insights about all selected tables
+            function updateGlobalAnalysis() {
+                // Get all selected table names
+                const selectedTableNames = Array.from(selectedTables);
+                
+                if (selectedTableNames.length === 0) {
+                    document.getElementById('joinKeysAnalysis').innerHTML = '<p style="color: var(--text-secondary); font-style: italic; font-size: 0.85rem;">Select tables to see join key analysis</p>';
+                    return;
+                }
+                
+                // Find edges between selected tables
+                const relevantEdges = data.lineage.edges.filter(function(edge) {
+                    return selectedTableNames.includes(edge.source.id || edge.source) && 
+                           selectedTableNames.includes(edge.target.id || edge.target);
+                });
+                
+                // Group join keys and get sample data
+                const joinKeyAnalysis = {};
+                relevantEdges.forEach(function(edge) {
+                    if (edge.type === 'join_key' && edge.label) {
+                        if (!joinKeyAnalysis[edge.label]) {
+                            joinKeyAnalysis[edge.label] = {
+                                tables: new Set(),
+                                sampleValues: new Set()
+                            };
+                        }
+                        joinKeyAnalysis[edge.label].tables.add(edge.source.id || edge.source);
+                        joinKeyAnalysis[edge.label].tables.add(edge.target.id || edge.target);
+                        
+                        // Get sample values from table data
+                        [edge.source.id || edge.source, edge.target.id || edge.target].forEach(function(tableName) {
+                            const tableData = data.tables.find(t => t.table_name === tableName);
+                            if (tableData && tableData.sample_data) {
+                                tableData.sample_data.slice(0, 3).forEach(function(row) { // Take first 3 samples
+                                    if (row[edge.label] && row[edge.label] !== null) {
+                                        joinKeyAnalysis[edge.label].sampleValues.add(String(row[edge.label]).substring(0, 20)); // Truncate long values
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+                
+                // Render join key analysis
+                let joinHtml = '';
+                if (Object.keys(joinKeyAnalysis).length === 0) {
+                    joinHtml = '<p style="color: var(--text-secondary); font-style: italic; font-size: 0.85rem;">No shared join keys found between selected tables</p>';
+                } else {
+                    joinHtml = '<div style="display: grid; gap: 8px;">';
+                    
+                    Object.entries(joinKeyAnalysis)
+                        .sort(function(a, b) { return b[1].tables.size - a[1].tables.size; })
+                        .forEach(function(entry) {
+                            const joinKey = entry[0];
+                            const analysis = entry[1];
+                            const tableCount = analysis.tables.size;
+                            const sampleValues = Array.from(analysis.sampleValues).slice(0, 3);
+                            const tableNames = Array.from(analysis.tables).join(', ');
+                            
+                            joinHtml += '<div style="background: var(--bg-primary); border-radius: 6px; padding: 10px; border-left: 3px solid var(--chart-color-3);">';
+                            joinHtml += '<div style="font-weight: 600; color: var(--chart-color-3); font-size: 0.9rem; margin-bottom: 4px;">' + joinKey + '</div>';
+                            joinHtml += '<div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 6px;">Connects ' + tableCount + ' tables: ' + tableNames + '</div>';
+                            
+                            if (sampleValues.length > 0) {
+                                joinHtml += '<div style="font-size: 0.75rem; color: var(--text-muted);">Sample values: <span style="color: var(--accent-purple-light);">' + sampleValues.join(', ') + (analysis.sampleValues.size > 3 ? '...' : '') + '</span></div>';
+                            }
+                            
+                            joinHtml += '</div>';
+                        });
+                    
+                    joinHtml += '</div>';
+                }
+                
+                document.getElementById('joinKeysAnalysis').innerHTML = joinHtml;
             }
             
             function renderViewDependenciesAnalysis() {
@@ -2305,13 +2614,18 @@ function generateHtmlReport(data) {
                 node.append('text')
                     .attr('class', 'node-text')
                     .attr('dy', '.35em')
-                    .style('font-size', '10px')
-                    .text(d => d.id.length > 12 ? d.id.substring(0, 12) + '...' : d.id);
+                    .style('font-size', '14px')
+                    .style('font-weight', '600')
+                    .style('fill', 'var(--text-primary)')
+                    .style('text-shadow', '0 0 3px rgba(0,0,0,0.8), 1px 1px 2px rgba(0,0,0,0.6)')
+                    .style('text-anchor', 'middle')
+                    .style('pointer-events', 'none')
+                    .text(d => d.id);
                 
                 // Add title for hover
                 node.append('title')
                     .text(d => {
-                        let title = d.id + ' (' + d.type + ')\\nRows: ' + d.row_count.toLocaleString() + '\\nSize: ' + d.size_mb + ' MB';
+                        let title = d.id + ' (' + d.type + ')\\nRows: ' + d.row_count.toLocaleString() + '\\nSize: ' + (d.size_bytes ? Math.round(d.size_bytes / (1024 * 1024) * 100) / 100 : 0) + ' MB';
                         if (d.join_keys && d.join_keys.length > 0) {
                             title += '\\nJoin Keys: ' + d.join_keys.join(', ');
                         }
