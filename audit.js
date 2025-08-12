@@ -19,19 +19,104 @@ const colors = {
     nc: "\x1b[0m"
 };
 
-const EXCLUDE_AS_JOIN_KEYS = [
-    "event",
-    "event_name",
-    "time",
-    "timestamp", 
-    "created_at",
-    "updated_at",
-    "event_time",
-    "_table_suffix",
-    "_partitiontime",
-    "_partitiondate",
-    "event_definition_id"
-];
+// --- Field Pattern Detection Constants ---
+
+import {
+	EXCLUDE_AS_JOIN_KEYS,
+	VALID_TIMESTAMP_TYPES,
+	TIMESTAMP_FIELD_PATTERNS,
+	USER_ID_PATTERNS,
+	EVENT_NAME_PATTERNS,
+	SESSION_PATTERNS,
+	PII_PATTERNS,
+	ANALYTICS_PATTERNS,
+	COMMERCE_PATTERNS,
+	COMMUNICATION_PATTERNS,
+	CONTENT_PATTERNS,
+	EVENT_PROPERTY_PATTERNS,
+	FOREIGN_KEY_PATTERNS,
+	GEOGRAPHIC_PATTERNS,
+	NUMERIC_TIMESTAMP_PATTERNS,
+	ORGANIZATIONAL_PATTERNS,
+	PRIMARY_KEY_PATTERNS,
+	SYSTEM_METADATA_PATTERNS
+} from './entities.js';
+
+
+// Enhanced field type detection using comprehensive patterns
+function detectFieldType(fieldName, dataType) {
+    const detectedTypes = [];
+    
+    // Check ALL pattern groups for matches (including PII)
+    const patternGroups = [
+        { patterns: [{ pattern: TIMESTAMP_FIELD_PATTERNS, type: 'timestamp' }], group: 'temporal' },
+        { patterns: [{ pattern: NUMERIC_TIMESTAMP_PATTERNS, type: 'numeric_timestamp' }], group: 'temporal' },
+        { patterns: [{ pattern: USER_ID_PATTERNS, type: 'user_id' }], group: 'identity' },
+        { patterns: [{ pattern: SESSION_PATTERNS, type: 'session' }], group: 'identity' },
+        { patterns: [{ pattern: PRIMARY_KEY_PATTERNS, type: 'primary_key' }], group: 'identity' },
+        { patterns: [{ pattern: FOREIGN_KEY_PATTERNS, type: 'foreign_key' }], group: 'identity' },
+        { patterns: [{ pattern: EVENT_NAME_PATTERNS, type: 'event_name' }], group: 'event' },
+        { patterns: [{ pattern: EVENT_PROPERTY_PATTERNS, type: 'event_properties' }], group: 'event' },
+        { patterns: GEOGRAPHIC_PATTERNS, group: 'geographic' },
+        { patterns: COMMERCE_PATTERNS, group: 'commerce' },
+        { patterns: SYSTEM_METADATA_PATTERNS, group: 'system' },
+        { patterns: CONTENT_PATTERNS, group: 'content' },
+        { patterns: ANALYTICS_PATTERNS, group: 'analytics' },
+        { patterns: ORGANIZATIONAL_PATTERNS, group: 'organizational' },
+        { patterns: COMMUNICATION_PATTERNS, group: 'communication' },
+        // Include PII patterns in the main detection
+        { patterns: PII_PATTERNS.map(p => ({ pattern: p.pattern, type: p.type })), group: 'pii' }
+    ];
+    
+    // Test field name against all patterns
+    patternGroups.forEach(group => {
+        group.patterns.forEach(patternInfo => {
+            if (patternInfo.pattern.test(fieldName)) {
+                detectedTypes.push({
+                    type: patternInfo.type,
+                    group: group.group
+                });
+            }
+        });
+    });
+    
+    // Special handling for data type-based detection
+    if (VALID_TIMESTAMP_TYPES.has(dataType)) {
+        detectedTypes.push({
+            type: 'timestamp',
+            group: 'temporal',
+            by_data_type: true
+        });
+    }
+    
+    // Check for boolean types
+    if (/boolean|bool|bit/i.test(dataType) || /^(is_|has_|can_|should_|will_|was_)/i.test(fieldName)) {
+        detectedTypes.push({
+            type: 'boolean_flag',
+            group: 'system'
+        });
+    }
+    
+    // Check for numeric types that might be IDs
+    if (/int|integer|bigint|number|numeric/i.test(dataType) && /_id$/i.test(fieldName)) {
+        detectedTypes.push({
+            type: 'numeric_id',
+            group: 'identity'
+        });
+    }
+    
+    // Remove duplicates and filter out unknown types
+    const uniqueTypes = [];
+    const seen = new Set();
+    detectedTypes.forEach(typeInfo => {
+        if (typeInfo.type !== 'unknown' && !seen.has(typeInfo.type)) {
+            seen.add(typeInfo.type);
+            uniqueTypes.push(typeInfo);
+        }
+    });
+    
+    return uniqueTypes;
+}
 
 // Analytics compatibility analysis based on Mixpanel requirements
 function analyzeAnalyticsCompatibility(tables) {
@@ -52,28 +137,6 @@ function analyzeAnalyticsCompatibility(tables) {
         }
     };
 
-    // Enhanced field pattern detection with flexible matching
-    const validTimestampTypes = new Set(['TIMESTAMP', 'DATETIME', 'DATE', 'TIME']);
-    // More flexible timestamp patterns including common variations
-    const timestampFieldPatterns = /^(.*_)?(time|timestamp|ts|date|datetime|created|updated|occurred|happened|event_time)(_.*)?$/i;
-    // Comprehensive user ID patterns with flexible separators and synonyms  
-    const userIdPatterns = /^(.*_)?(user|client|customer|device|profile|account|member|person|identity|distinct|anonymous|anon|actor|uid|uuid)(_?)(id|guid|key|identifier)?(_.*)?$/i;
-    // Event name/type patterns for multi-schema event tables
-    const eventNamePatterns = /^(.*_)?(event|action|activity|type|name|category|kind)(_?)(name|type|category|kind)?(_.*)?$/i;
-    // Session/visit patterns
-    const sessionPatterns = /^(.*_)?(session|visit|browser|tab)(_?)(id|uuid|key|identifier)?(_.*)?$/i;
-    // Enhanced PII patterns - more comprehensive but not overly permissive
-    const piiPatterns = [
-        { pattern: /^(.*_)?(email|e_?mail|mail)(_.*)?$/i, type: 'email' },
-        { pattern: /^(.*_)?(phone|telephone|mobile|cell)(_?)(number)?(_.*)?$/i, type: 'phone' },
-        { pattern: /^(.*_)?(first|given|fname|f_name)(_?)(name)?(_.*)?$/i, type: 'first_name' },
-        { pattern: /^(.*_)?(last|family|surname|lname|l_name)(_?)(name)?(_.*)?$/i, type: 'last_name' },
-        { pattern: /^(.*_)?(full|display|complete)(_?)(name)(_.*)?$/i, type: 'full_name' },
-        { pattern: /^(.*_)?(address|addr|street|home|billing|shipping)(_.*)?$/i, type: 'address' },
-        { pattern: /^(.*_)?(ssn|social|security)(_?)(number)?(_.*)?$/i, type: 'ssn' },
-        { pattern: /^(.*_)?(credit|debit|card)(_?)(number|num)?(_.*)?$/i, type: 'payment' },
-        { pattern: /^(.*_)?(ip|ip_addr|ip_address)(_.*)?$/i, type: 'ip_address' }
-    ];
 
     tables.forEach((table, index) => {
         try {
@@ -110,30 +173,22 @@ function analyzeAnalyticsCompatibility(tables) {
         if (table.schema && table.schema.length > 0) {
             analysis.schema_complexity.total_fields = table.schema.length;
             
-            // Group fields by column_name to handle nested fields properly
-            const columnGroups = new Map();
+            // Process each field individually to preserve nested field structure
+            // Don't group by column_name as this loses nested fields like linked_device.language
             table.schema.forEach(field => {
-                const columnName = field.column_name;
-                if (!columnGroups.has(columnName)) {
-                    columnGroups.set(columnName, []);
-                }
-                columnGroups.get(columnName).push(field);
-            });
-
-            columnGroups.forEach((fieldGroup, columnName) => {
-                const mainField = fieldGroup[0]; // The top-level field
-                const fieldName = columnName.toLowerCase();
-                const fieldType = mainField.nested_type || mainField.data_type || '';
+                const fieldPath = field.nested_field_path || field.column_name;
+                const fieldName = fieldPath.toLowerCase();
+                const fieldType = field.nested_type || field.data_type || '';
                 
                 // Check for timestamps
-                const isTimestampType = validTimestampTypes.has(fieldType);
-                const isTimestampName = timestampFieldPatterns.test(fieldName);
+                const isTimestampType = VALID_TIMESTAMP_TYPES.has(fieldType);
+                const isTimestampName = TIMESTAMP_FIELD_PATTERNS.test(fieldName);
                 if (isTimestampType || isTimestampName) {
                     analysis.required_fields.has_timestamp = true;
                     analysis.required_fields.timestamp_fields.push({
-                        name: columnName,
+                        name: fieldPath,
                         type: fieldType,
-                        nullable: mainField.is_nullable === 'YES',
+                        nullable: field.is_nullable === 'YES',
                         by_type: isTimestampType,
                         by_name: isTimestampName
                     });
@@ -141,42 +196,42 @@ function analyzeAnalyticsCompatibility(tables) {
                 }
 
                 // Check for user IDs  
-                if (userIdPatterns.test(fieldName)) {
+                if (USER_ID_PATTERNS.test(fieldName)) {
                     analysis.required_fields.has_user_id = true;
                     analysis.required_fields.user_id_fields.push({
-                        name: columnName,
+                        name: fieldPath,
                         type: fieldType,
-                        nullable: mainField.is_nullable === 'YES'
+                        nullable: field.is_nullable === 'YES'
                     });
                     insights.field_patterns.user_id_fields.add(fieldName);
                 }
 
                 // Check for event names (multi-schema indicator)
-                if (eventNamePatterns.test(fieldName)) {
+                if (EVENT_NAME_PATTERNS.test(fieldName)) {
                     insights.field_patterns.event_name_fields.add(fieldName);
                 }
 
                 // Check for session fields
-                if (sessionPatterns.test(fieldName)) {
+                if (SESSION_PATTERNS.test(fieldName)) {
                     insights.field_patterns.session_fields.add(fieldName);
                 }
 
-                // Complex field analysis - check if this column has nested subfields
-                const hasSubfields = fieldGroup.length > 1 || mainField.nested_field_path.includes('.');
+                // Complex field analysis - check if this field is complex or nested
+                const isNested = fieldPath.includes('.');
                 const isComplexType = ['STRUCT', 'RECORD', 'JSON'].some(type => fieldType.includes(type)) || 
                                      fieldType.includes('REPEATED') || fieldType.includes('ARRAY');
                 
-                if (hasSubfields || isComplexType) {
+                if (isNested || isComplexType) {
                     const complexField = {
-                        name: columnName,
+                        name: fieldPath,
                         type: fieldType,
-                        subfield_count: fieldGroup.length,
-                        subfields: fieldGroup.map(f => ({
-                            path: f.nested_field_path || f.column_name,
-                            type: f.nested_type || f.data_type,
-                            depth: (f.nested_field_path || f.column_name).split('.').length
-                        })),
-                        max_nesting_depth: fieldGroup.length > 0 ? Math.max(...fieldGroup.map(f => (f.nested_field_path || f.column_name).split('.').length)) : 1
+                        subfield_count: 1, // Each field is counted individually now
+                        subfields: [{
+                            path: fieldPath,
+                            type: fieldType,
+                            depth: fieldPath.split('.').length
+                        }],
+                        max_nesting_depth: fieldPath.split('.').length
                     };
                     
                     analysis.schema_complexity.complex_fields.push(complexField);
@@ -184,33 +239,37 @@ function analyzeAnalyticsCompatibility(tables) {
                         analysis.schema_complexity.nested_depth, 
                         complexField.max_nesting_depth
                     );
-                    analysis.schema_complexity.total_subfields += fieldGroup.length;
+                    analysis.schema_complexity.total_subfields += 1;
                     insights.field_patterns.complex_fields.add(fieldName);
                 }
 
                 // Enhanced PII detection
                 const detectedPII = [];
-                piiPatterns.forEach(piiInfo => {
+                PII_PATTERNS.forEach(piiInfo => {
                     if (piiInfo.pattern.test(fieldName)) {
                         detectedPII.push(piiInfo.type);
                     }
                 });
                 if (detectedPII.length > 0) {
                     analysis.data_quality.potential_pii.push({
-                        field: columnName,
+                        field: fieldPath,
                         types: detectedPII
                     });
                     detectedPII.forEach(type => insights.field_patterns.pii_fields.add(`${fieldName}:${type}`));
                 }
 
-                // Store field details
-                analysis.field_details[columnName] = {
+                // Enhanced field type detection
+                const detectedFieldTypes = detectFieldType(fieldName, fieldType);
+                
+                // Store field details using full path as key
+                analysis.field_details[fieldPath] = {
                     type: fieldType,
-                    nullable: mainField.is_nullable === 'YES',
-                    is_partitioning: mainField.is_partitioning_column,
-                    is_clustering: mainField.clustering_ordinal_position != null,
-                    subfield_count: fieldGroup.length,
-                    detected_pii: detectedPII
+                    nullable: field.is_nullable === 'YES',
+                    is_partitioning: field.is_partitioning_column,
+                    is_clustering: field.clustering_ordinal_position != null,
+                    subfield_count: 1,
+                    detected_pii: detectedPII,
+                    detected_field_types: detectedFieldTypes
                 };
             });
         }
@@ -337,6 +396,7 @@ function buildLineageGraph(tables) {
             id: table.table_name,
             type: table.table_type.toLowerCase(),
             row_count: table.row_count || 0,
+            size_bytes: table.size_bytes || 0,
             analytics_score: 0 // Will be populated by analytics analysis
         });
     });
@@ -453,6 +513,20 @@ async function runAudit() {
         console.log(`\n${colors.yellow}Analyzing tables for analytics compatibility...${colors.nc}`);
         const analyticsInsights = analyzeAnalyticsCompatibility(rawData.tables);
         console.log(`${colors.green}✓ Analytics analysis complete: ${analyticsInsights.event_tables.length} EVENT tables found.${colors.nc}`);
+
+        // Enhance table schemas with detected field types
+        console.log(`${colors.yellow}Enhancing schemas with field type detection...${colors.nc}`);
+        rawData.tables.forEach(table => {
+            if (table.schema && table.schema.length > 0) {
+                table.schema.forEach(field => {
+                    const fieldPath = field.nested_field_path || field.column_name;
+                    const fieldName = fieldPath.toLowerCase();
+                    const fieldType = field.nested_type || field.data_type || '';
+                    field.detected_field_types = detectFieldType(fieldName, fieldType);
+                });
+            }
+        });
+        console.log(`${colors.green}✓ Field type detection complete.${colors.nc}`);
 
         // Update lineage graph nodes with analytics scores
         lineageGraph.nodes.forEach(node => {
