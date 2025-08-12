@@ -1177,7 +1177,6 @@ function generateHtmlReport(data) {
                         'ordinal_position', 
                         'is_nullable',
                         'data_type',
-                        'is_partitioning_column',
                         'nested_field_path',
                         'nested_type',
                         'join_key',
@@ -1200,8 +1199,6 @@ function generateHtmlReport(data) {
                         displayName = 'is nullable';
                     } else if (h === 'data_type') {
                         displayName = 'data type';
-                    } else if (h === 'is_partitioning_column') {
-                        displayName = 'is partitioning column';
                     } else if (h === 'nested_field_path') {
                         displayName = 'field path';
                     } else if (h === 'nested_type') {
@@ -1261,13 +1258,15 @@ function generateHtmlReport(data) {
                         if (header === 'join_key') {
                             value = rowData.is_potential_join_key ? '✓' : '';
                         } else if (header === 'field_type') {
-                            // Format detected field types as 'type (group)' format
+                            // Format detected field types as comma-separated list
                             if (rowData.detected_field_types && rowData.detected_field_types.length > 0) {
-                                // Take just the first type to keep it concise
-                                const firstType = rowData.detected_field_types[0];
-                                const typeName = firstType.type.replace(/_/g, ' ');
-                                const groupName = firstType.group;
-                                value = typeName + ' (' + groupName + ')';
+                                value = rowData.detected_field_types
+                                    .map(typeInfo => {
+                                        const typeName = typeInfo.type.replace(/_/g, ' ');
+                                        const groupName = typeInfo.group;
+                                        return typeName + ' (' + groupName + ')';
+                                    })
+                                    .join(', ');
                             } else {
                                 value = '';
                             }
@@ -1327,9 +1326,9 @@ function generateHtmlReport(data) {
                             cell.style.fontSize = '0.75rem';
                             cell.style.fontFamily = 'var(--font-mono)';
                             cell.style.color = 'var(--text-secondary)';
-                            cell.style.width = '130px';
-                            cell.style.maxWidth = '130px';
-                            cell.style.minWidth = '130px';
+                            cell.style.width = '180px';
+                            cell.style.maxWidth = '180px';
+                            cell.style.minWidth = '150px';
                             cell.style.wordWrap = 'break-word';
                             cell.style.whiteSpace = 'normal';
                             cell.style.lineHeight = '1.3';
