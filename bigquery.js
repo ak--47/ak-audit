@@ -410,6 +410,17 @@ async function runDataExtraction() {
 		await fs.mkdir(path.join(config.outputDir, "samples"), { recursive: true });
 		await fs.mkdir(path.join(config.outputDir, "reports"), { recursive: true });
 
+		// Copy favicon.ico to reports directory if it exists
+		try {
+			await fs.copyFile('favicon.ico', path.join(config.outputDir, "reports", "favicon.ico"));
+			console.log(`${colors.green}✓ Copied favicon.ico to reports directory${colors.nc}`);
+		} catch (faviconError) {
+			if (faviconError.code !== 'ENOENT') {
+				console.log(`${colors.yellow}⚠ Warning: Could not copy favicon.ico: ${faviconError.message}${colors.nc}`);
+			}
+			// If favicon doesn't exist, silently continue (not a critical error)
+		}
+
 		console.log(`${colors.green}✓ Output directories created:${colors.nc}`);
 		console.log(`  - ${path.join(config.outputDir, "reports")} (aggregated reports)`);
 		console.log(`  - ${path.join(config.outputDir, "schemas")} (individual table schemas)`);

@@ -70,6 +70,19 @@ async function rebuildHtmlReport() {
         const outputPath = path.join('./output', 'reports', 'index.html');
         await fs.writeFile(outputPath, htmlReport);
         
+        // Copy favicon.ico to output directory if it exists
+        const faviconSource = path.join('.', 'favicon.ico');
+        const faviconDest = path.join('./output', 'reports', 'favicon.ico');
+        try {
+            await fs.copyFile(faviconSource, faviconDest);
+            console.log(`📄 Copied favicon.ico to reports directory`);
+        } catch (faviconError) {
+            if (faviconError.code !== 'ENOENT') {
+                console.log(`${colors.yellow}⚠ Warning: Could not copy favicon.ico: ${faviconError.message}${colors.nc}`);
+            }
+            // If favicon doesn't exist, silently continue (not a critical error)
+        }
+        
         console.log(`${colors.green}✅ HTML report successfully rebuilt!${colors.nc}`);
         console.log(`📁 Report saved to: ${outputPath}`);
         console.log(`🌐 Open in browser: file://${path.resolve(outputPath)}`);
