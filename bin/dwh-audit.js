@@ -20,6 +20,18 @@ const colors = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- Banner Display ---
+function displayBanner() {
+  console.log(`${colors.cyan}
+╔══════════════════════════════════════════════════════════════╗
+║                          ${colors.magenta}DWH-AUDIT${colors.cyan}                           ║
+║                ${colors.yellow}Data Warehouse Auditing Tool${colors.cyan}                  ║
+║                 ${colors.green}Extract • Analyze • Report${colors.cyan}                   ║
+╚══════════════════════════════════════════════════════════════╝${colors.nc}
+`);
+}
+
+
 // --- Input Validation Functions ---
 async function validateCredentials(credentialsPath) {
 	try {
@@ -94,6 +106,15 @@ function validateLocation(location) {
 	}
 	
 	return location;
+}
+
+// Track if banner was shown
+let bannerShown = false;
+
+// Show banner for help or any interactive command
+if (process.argv.includes('--help') || process.argv.includes('-h') || process.argv.length <= 2) {
+  displayBanner();
+  bannerShown = true;
 }
 
 // --- CLI Configuration ---
@@ -187,6 +208,10 @@ async function main() {
       throw new Error(`Output directory parent '${outputParent}' does not exist or is not accessible`);
     }
 
+    // Show banner if not already shown
+    if (!bannerShown) {
+      displayBanner();
+    }
     console.log(`\n${colors.cyan}🔍 Data Warehouse Auditor (Modular Pipeline)${colors.nc}\n`);
     console.log(`${colors.cyan}Configuration:${colors.nc}`);
     console.log(`  Project ID: ${colors.green}${validatedProject}${colors.nc}`);

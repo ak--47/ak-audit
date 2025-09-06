@@ -1,6 +1,6 @@
 {
 	"name": "dwh-audit",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"type": "module",
 	"bin": {
 		"dwh-audit": "./bin/dwh-audit.js"
@@ -21,12 +21,12 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ak-audit/dwh-audit.git"
+		"url": "git+https://github.com/your-org/dwh-audit.git"
 	},
 	"bugs": {
-		"url": "https://github.com/ak-audit/dwh-audit/issues"
+		"url": "https://github.com/your-org/dwh-audit/issues"
 	},
-	"homepage": "https://github.com/ak-audit/dwh-audit#readme",
+	"homepage": "https://github.com/your-org/dwh-audit#readme",
 	"scripts": {
 		"test": "vitest",
 		"test:run": "vitest run",
@@ -36,8 +36,10 @@
 		"extract": "node bigquery.js",
 		"analyze": "node audit.js",
 		"report": "node rebuild.js",
-		"pipeline:watch": "nodemon --watch audit.js --watch buildReport.js --exec 'node audit.js && node rebuild.js'",
-		"post": "npm publish --access public"
+		"rebuild": "npm run analyze && npm run report",
+		"pipeline:watch": "nodemon --watch audit.js --watch buildReport.js --exec 'npm run rebuild'",
+		"post": "npm publish --access public",
+		"start": "node bin/dwh-audit.js"
 	},
 	"keywords": [
 		"bigquery",
@@ -52,7 +54,7 @@
 		"typescript",
 		"modular"
 	],
-	"author": "ak@mixpanel.com",
+	"author": "Mixpanel <engineering@mixpanel.com>",
 	"license": "MIT",
 	"description": "Modular CLI tool for auditing data warehouses - extract, analyze, and report on schemas, data quality, and analytics readiness",
 	"dependencies": {

@@ -7,6 +7,7 @@ export default defineConfig({
     hookTimeout: 30000,
     teardownTimeout: 30000,
     globals: true,
-    environment: 'node'
+    environment: 'node',
+    watch: false // Disable automatic watch mode
   }
 });
