@@ -190,3 +190,50 @@ describe('views never trust storage metadata', () => {
 		expect(r).toMatchObject({ rowCount: 150, source: 'table-metadata' });
 	});
 });
+
+describe('counting is gated by the run total, not the profile cap', () => {
+	it('lets a large count through when only the per-table profile cap would block it', async () => {
+		// Counting a view is not profiling a table. Conflating the two made
+		// --count-budget look inert: raising it changed nothing.
+		const { BudgetTracker } = await import('../src/warehouse/bigquery/budget.ts');
+		const budget = new BudgetTracker({
+			maxBytesPerTable: 1024,
+			maxBytesTotal: 10 * 1024 ** 4,
+		});
+		const client = {
+			dryRun: vi.fn().mockResolvedValue(300 * 1024 ** 3),
+			query: vi.fn().mockResolvedValue({ rows: [{ n: 7 }], bytesProcessed: 300 * 1024 ** 3 }),
+		} as never;
+
+		const r = await resolveRowCount(client, {
+			fullName: 'p.d.v',
+			kind: 'VIEW',
+			partitions: [],
+			facts: { numRows: null, requirePartitionFilter: false },
+			storageRows: null,
+			countBudgetBytes: 400 * 1024 ** 3,
+			budget,
+		});
+		expect(r).toMatchObject({ rowCount: 7, source: 'count-query' });
+	});
+
+	it('still refuses a count that would exceed the run total', async () => {
+		const { BudgetTracker } = await import('../src/warehouse/bigquery/budget.ts');
+		const budget = new BudgetTracker({ maxBytesPerTable: 1e15, maxBytesTotal: 1024 });
+		const client = {
+			dryRun: vi.fn().mockResolvedValue(1024 ** 3),
+			query: vi.fn(),
+		} as never;
+		const r = await resolveRowCount(client, {
+			fullName: 'p.d.v',
+			kind: 'VIEW',
+			partitions: [],
+			facts: { numRows: null, requirePartitionFilter: false },
+			storageRows: null,
+			countBudgetBytes: 1e15,
+			budget,
+		});
+		expect(r.error).toContain('total limit');
+		expect((client as unknown as { query: ReturnType<typeof vi.fn> }).query).not.toHaveBeenCalled();
+	});
+});

@@ -267,6 +267,26 @@ export class BudgetTracker {
 		return { allowed: true, reason: `${table}: ${formatBytes(estimatedBytes)}` };
 	}
 
+	/**
+	 * Judges a cost against the run total only.
+	 *
+	 * Counting a view is not profiling a table, so the per-table profile cap
+	 * does not apply to it. Conflating the two made `--count-budget` look
+	 * ineffective: raising it changed nothing, because the profile cap still
+	 * refused the query.
+	 */
+	checkTotal(estimatedBytes: number): BudgetDecision {
+		if (this.spent + estimatedBytes > this.limits.maxBytesTotal) {
+			return {
+				allowed: false,
+				reason:
+					`would push the run past its ${formatBytes(this.limits.maxBytesTotal)} ` +
+					`total limit (${formatBytes(this.spent)} already used)`,
+			};
+		}
+		return { allowed: true, reason: formatBytes(estimatedBytes) };
+	}
+
 	record(bytes: number): void {
 		this.spent += bytes;
 	}
