@@ -100,6 +100,7 @@ export interface ReportPayload {
 	usageDays: number | null;
 	usageNote: string | null;
 	unusedTables: string[];
+	absentTables: string[];
 	totals: {
 		tables: number;
 		views: number;
@@ -254,6 +255,7 @@ export function buildPayload(
 		usageDays: usage?.windowDays ?? null,
 		usageNote: usage?.note ?? null,
 		unusedTables: usage?.unusedTables ?? [],
+		absentTables: usage?.absentTables ?? [],
 		totals: {
 			tables: reportTables.filter((t) => t.kind === 'TABLE').length,
 			views: reportTables.filter((t) => t.kind !== 'TABLE').length,

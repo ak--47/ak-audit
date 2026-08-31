@@ -48,7 +48,10 @@ export async function runUsage(options: UsageStageOptions): Promise<UsageResult>
 		return usage;
 	}
 
-	const used = Object.keys(usage.tables).length;
+	// Only tables still in the dataset count towards "N of M read". Names that
+	// have since been dropped are reported separately, or a 37-table dataset
+	// claims 49 of its tables were read.
+	const used = Object.values(usage.tables).filter((t) => t.present).length;
 	log.info(
 		`${usage.jobsSeen.toLocaleString()} jobs, ${used} of ${options.tables.length} tables read, ` +
 			`${usage.topUsers.length} users — ${formatBytes(usage.bytesProcessed)}`,
@@ -56,6 +59,11 @@ export async function runUsage(options: UsageStageOptions): Promise<UsageResult>
 	if (usage.scope === 'user') log.warn(usage.note);
 	if (usage.unusedTables.length > 0) {
 		log.info(`${usage.unusedTables.length} table(s) not read by anyone in the window`);
+	}
+	if (usage.absentTables.length > 0) {
+		log.info(
+			`${usage.absentTables.length} name(s) queried in the window are no longer in the dataset`,
+		);
 	}
 	if (usage.truncated) log.warn('job list hit its row cap; counts are a lower bound');
 

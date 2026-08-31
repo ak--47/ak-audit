@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mentionsTable } from '../src/warehouse/bigquery/usage.ts';
+import { isPseudoTable, mentionsTable } from '../src/warehouse/bigquery/usage.ts';
 
 describe('mentionsTable', () => {
 	it('finds a view referenced with its dataset prefix', () => {
@@ -29,5 +29,25 @@ describe('mentionsTable', () => {
 	it('is false for empty input', () => {
 		expect(mentionsTable(null, 'x')).toBe(false);
 		expect(mentionsTable('SELECT 1', '')).toBe(false);
+	});
+});
+
+describe('isPseudoTable', () => {
+	it('rejects the INFORMATION_SCHEMA views', () => {
+		// These are listed in referenced_tables but are not dataset contents.
+		expect(isPseudoTable('INFORMATION_SCHEMA.COLUMNS')).toBe(true);
+		expect(isPseudoTable('INFORMATION_SCHEMA.JOBS_BY_PROJECT')).toBe(true);
+	});
+
+	it('rejects the double-underscore pseudo-tables', () => {
+		// Counting these made a real 37-table dataset report 39 read.
+		expect(isPseudoTable('__TABLES__')).toBe(true);
+		expect(isPseudoTable('__TABLES_SUMMARY__')).toBe(true);
+		expect(isPseudoTable('__PARTITIONS_SUMMARY__')).toBe(true);
+	});
+
+	it('keeps a real table whose name merely starts with an underscore', () => {
+		expect(isPseudoTable('_staging_accounts')).toBe(false);
+		expect(isPseudoTable('dim_accounts')).toBe(false);
 	});
 });

@@ -201,11 +201,24 @@ export function renderOverview(
 		);
 		for (const u of ranked.slice(0, 25)) {
 			lines.push(
-				`| \`${u.table}\` | ${num(u.queries)} | ${num(u.users)} | ` +
-					`${bytes(u.bytesScanned)} | ${(u.lastQueried ?? '—').slice(0, 10)} |`,
+				`| \`${u.table}\`${u.present ? '' : ' *(gone)*'} | ${num(u.queries)} | ` +
+					`${num(u.users)} | ${bytes(u.bytesScanned)} | ` +
+					`${(u.lastQueried ?? '—').slice(0, 10)} |`,
 			);
 		}
 		lines.push('');
+		if (usage.absentTables.length > 0) {
+			lines.push(
+				`### Queried but no longer here (${usage.absentTables.length})`,
+				'',
+				'These names were read during the window and are not in the dataset now.',
+				'Either they were dropped, or something still queries a table that has',
+				'moved.',
+				'',
+				usage.absentTables.map((t) => `\`${t}\``).join(', '),
+				'',
+			);
+		}
 		if (usage.unusedTables.length > 0) {
 			lines.push(
 				`### Not read by anyone in ${usage.windowDays} days (${usage.unusedTables.length})`,

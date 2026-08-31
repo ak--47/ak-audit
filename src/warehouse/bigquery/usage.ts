@@ -71,6 +71,15 @@ export type UsageDetection =
 export interface TableUsage {
 	table: string;
 	/**
+	 * Whether the table is still in the dataset.
+	 *
+	 * A name can appear in the window and be gone by the time the dataset is
+	 * extracted -- a staging table built and dropped, or one renamed by a
+	 * migration. That is drift worth seeing, so the row is kept and flagged
+	 * rather than discarded.
+	 */
+	present: boolean;
+	/**
 	 * How this table's usage was found.
 	 *
 	 * Querying a view resolves to its underlying tables, so a view never
@@ -102,6 +111,8 @@ export interface UsageResult {
 	topUsers: { user: string; queries: number }[];
 	/** Tables in the dataset that no job touched in the window. */
 	unusedTables: string[];
+	/** Names queried in the window that are no longer in the dataset. */
+	absentTables: string[];
 	truncated: boolean;
 	note: string;
 }
@@ -160,6 +171,17 @@ function isTrue(v: unknown): boolean {
  * after a common word can still over-count, so callers label the result as
  * approximate rather than exact.
  */
+/**
+ * Whether a referenced-table name is a BigQuery pseudo-table.
+ *
+ * `INFORMATION_SCHEMA.*`, `__TABLES__` and `__TABLES_SUMMARY__` are listed as
+ * referenced tables but are not dataset contents. Counting them made a
+ * 37-table dataset report 39 tables read.
+ */
+export function isPseudoTable(tableId: string): boolean {
+	return tableId.startsWith('INFORMATION_SCHEMA') || /^__.*__$/.test(tableId);
+}
+
 export function mentionsTable(sql: string | null, table: string): boolean {
 	if (!sql || !table) return false;
 	const escaped = table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -201,6 +223,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 		tables: {},
 		topUsers: [],
 		unusedTables: [],
+		absentTables: [],
 		truncated: false,
 		note,
 	});
@@ -244,6 +267,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 	if (scope === 'unavailable') return empty('unavailable', 'query history unavailable');
 
 	// Everything below is local aggregation over the single scan above.
+	const known = new Set(knownTables);
 	const tables = new Map<string, TableUsage>();
 	const userTotals = new Map<string, number>();
 	const coCounts = new Map<string, Map<string, number>>();
@@ -252,7 +276,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 		// INFORMATION_SCHEMA views appear as referenced tables but are not
 		// part of the dataset's contents.
 		const refs = (row.referenced_tables ?? []).filter(
-			(t) => t.dataset_id === dataset && !t.table_id.startsWith('INFORMATION_SCHEMA'),
+			(t) => t.dataset_id === dataset && !isPseudoTable(t.table_id),
 		);
 		const namedViews = viewNames.filter((v) => mentionsTable(row.query, v));
 		if (refs.length === 0 && namedViews.length === 0) continue;
@@ -262,7 +286,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 
 		const bytes = toNumber(row.total_bytes_processed);
 		const all = (row.referenced_tables ?? [])
-			.filter((t) => !t.table_id.startsWith('INFORMATION_SCHEMA'))
+			.filter((t) => !isPseudoTable(t.table_id))
 			.map((t) => `${t.project_id}.${t.dataset_id}.${t.table_id}`);
 
 		const touched: { name: string; detection: UsageDetection }[] = [
@@ -276,6 +300,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 			if (!u) {
 				u = {
 					table: name,
+					present: known.has(name),
 					detection: ref.detection,
 					queries: 0,
 					users: 0,
@@ -346,6 +371,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 
 	// A table nobody read in the window is the most actionable thing here.
 	const unusedTables = knownTables.filter((t) => !tables.has(t)).sort();
+	const absentTables = [...tables.keys()].filter((t) => !known.has(t)).sort();
 
 	return {
 		scope,
@@ -358,6 +384,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 			.sort((a, b) => b.queries - a.queries)
 			.slice(0, 25),
 		unusedTables,
+		absentTables,
 		truncated: rows.length >= MAX_JOBS,
 		note,
 	};

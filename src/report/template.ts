@@ -685,12 +685,16 @@ function usageBanner() {
   if (!DATA.usageScope) return '';
   const scoped = DATA.usageScope === 'user';
   const unused = DATA.unusedTables.length;
+  const gone = (DATA.absentTables || []).length;
   return '<div class="banner' + (scoped ? ' warn' : '') + '">' +
     (scoped
       ? 'Query history covers <strong>only your own queries</strong> — project-wide history needs bigquery.jobs.listAll. Treat "unread" with care.'
       : 'Query history covers <strong>all users</strong>, last ' + DATA.usageDays + ' days.') +
     (unused ? ' <strong>' + unused + '</strong> table(s) went unread: ' +
       DATA.unusedTables.slice(0,12).map(esc).join(', ') + (unused>12?' …':'') : '') +
+    (gone ? ' <strong>' + gone + '</strong> name(s) queried in the window are no longer in ' +
+      'the dataset: ' + DATA.absentTables.slice(0,12).map(esc).join(', ') +
+      (gone>12?' …':'') : '') +
     '</div>';
 }
 
