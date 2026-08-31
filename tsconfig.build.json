@@ -1,0 +1,17 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": "dist",
+		"rootDir": "src",
+		"declaration": false,
+		"sourceMap": true,
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		// Source files import each other with a `.ts` suffix so they run under
+		// tsx with no build step. Node cannot resolve that at runtime, so the
+		// emit rewrites every relative specifier to `.js`.
+		"rewriteRelativeImportExtensions": true
+	},
+	"include": ["src/**/*.ts"]
+}

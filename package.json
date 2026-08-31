@@ -1,12 +1,38 @@
 {
 	"name": "ak-audit",
-	"private": true,
+	"version": "2.0.0",
 	"type": "module",
-	"description": "CLI that maps a BigQuery dataset for agents and humans",
+	"description": "Map a BigQuery dataset for agents and humans: metadata, column stats, relationships, usage, and a searchable report",
+	"keywords": [
+		"bigquery",
+		"data-catalog",
+		"data-discovery",
+		"schema",
+		"profiling",
+		"cli"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ak--47/ak-audit.git"
+	},
+	"bugs": {
+		"url": "https://github.com/ak--47/ak-audit/issues"
+	},
+	"homepage": "https://github.com/ak--47/ak-audit#readme",
+	"bin": {
+		"ak-audit": "dist/cli.js"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"engines": {
 		"node": ">=22"
 	},
 	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
 		"audit": "tsx src/cli.ts audit",
 		"extract": "tsx src/cli.ts extract",
 		"profile": "tsx src/cli.ts profile",
@@ -15,7 +41,9 @@
 		"serve": "npx --yes serve ./output/report",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"prepack": "npm run build",
+		"prepublishOnly": "npm run typecheck && npm test"
 	},
 	"dependencies": {
 		"@google-cloud/bigquery": "^9.0.3",

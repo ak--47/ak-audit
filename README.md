@@ -17,10 +17,17 @@ Two readers, one output:
 
 ## Install
 
-Needs Node 22 or newer.
+Needs Node 22 or newer. Nothing to install:
 
 ```bash
-npm install
+npx ak-audit audit my-project.my_dataset
+```
+
+Install it properly if you will use it often:
+
+```bash
+npm install -g ak-audit
+ak-audit audit my-project.my_dataset
 ```
 
 Authentication uses Application Default Credentials:
@@ -34,17 +41,17 @@ To use a service-account key instead, pass `--auth key.json` to any command.
 ## Use
 
 ```bash
-npx tsx src/cli.ts audit my-project.my_dataset
+npx ak-audit audit my-project.my_dataset
 ```
 
 That runs all four stages and prints where the report landed. Stages also run
 on their own:
 
 ```bash
-npx tsx src/cli.ts extract  my-project.my_dataset   # metadata; costs ~nothing
-npx tsx src/cli.ts profile  my-project.my_dataset   # column stats; costs money
-npx tsx src/cli.ts analyze                          # local, free
-npx tsx src/cli.ts report                           # local, free
+npx ak-audit extract  my-project.my_dataset   # metadata; costs ~nothing
+npx ak-audit profile  my-project.my_dataset   # column stats; costs money
+npx ak-audit analyze                          # local, free
+npx ak-audit report                           # local, free
 ```
 
 `analyze` and `report` read from disk, so re-running them is instant. Use that
@@ -53,14 +60,14 @@ while iterating.
 ### Know the cost before you pay it
 
 ```bash
-npx tsx src/cli.ts audit my-project.my_dataset --estimate
+npx ak-audit audit my-project.my_dataset --estimate
 ```
 
 Dry-runs every query, prints the projected scan size and cost, and executes
 nothing.
 
 ```bash
-npx tsx src/cli.ts audit my-project.my_dataset --no-profile
+npx ak-audit audit my-project.my_dataset --no-profile
 ```
 
 Metadata only. Effectively free, and a good first look at an unfamiliar dataset.
@@ -98,7 +105,7 @@ a later run unless `--force`.
 ### Seeing how a dataset is actually used
 
 ```bash
-npx tsx src/cli.ts audit my-project.my_dataset --usage --usage-days 30
+npx ak-audit audit my-project.my_dataset --usage --usage-days 30
 ```
 
 Schema says what a table holds. It cannot say whether anyone reads it. With
@@ -202,11 +209,41 @@ writing an adapter and nothing else.
 
 ## Development
 
+Clone it, then run the TypeScript directly. There is no build step in the
+development loop:
+
 ```bash
+npm install
+npx tsx src/cli.ts audit my-project.my_dataset
+
 npm test          # unit tests, no network
 npm run typecheck
+npm run build     # compile src/ to dist/, only needed to publish
 npm run serve     # serve the built report
 ```
 
 Tests use numbers measured against real BigQuery, so they document behaviour
 rather than restate the implementation.
+
+### Publishing
+
+The published package is compiled; the repo is not. Source files import each
+other with a `.ts` suffix so `tsx` can run them unbuilt, and `npm run build`
+rewrites those specifiers to `.js` on the way into `dist/`.
+
+```bash
+npm version patch     # or minor / major
+npm publish
+```
+
+`prepublishOnly` runs the typecheck, the tests and the build, so a broken
+`dist/` cannot reach npm. Only `dist/` and `README.md` are packed.
+
+Two things to keep in step, both enforced by a test in `test/package.test.ts`:
+
+- `version` in `package.json` and `TOOL_VERSION` in `src/pipeline.ts`. The
+  second is written into every `manifest.json`, so a reader can tell which
+  version produced an output folder. `npm version` bumps only the first, so
+  edit `TOOL_VERSION` in the same commit.
+- `bin` must point at `dist/cli.js`. The shebang in `src/cli.ts` is plain
+  `node` because that file becomes the published entry point.

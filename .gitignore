@@ -24,3 +24,9 @@ CLAUDE.md
 
 # browser automation artifacts
 .playwright-mcp/
+
+# Build output. Only the npm tarball carries it; the repo runs from src.
+/dist/
+
+# npm pack output and browser-check debris.
+*.tgz

@@ -1,9 +1,13 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 /**
  * ak-audit — maps a BigQuery dataset for agents and humans.
  *
  * Auth defaults to Application Default Credentials. `--auth <file>` uses a
  * service-account key instead.
+ *
+ * This shebang is plain `node` because it is the published entry point, and
+ * the published package is compiled. In this repo, run the TypeScript
+ * directly with `npx tsx src/cli.ts` instead of executing this file.
  */
 
 import { Command } from 'commander';
