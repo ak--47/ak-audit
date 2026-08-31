@@ -1,14 +1,26 @@
 node_modules
-output/*
-!output/.gitkeep
-.vscode
 .DS_Store
+.vscode
+
+# audit run output (regenerable)
+# Anchored: a bare "output/" also matches src/output/ and silently drops
+# source files from the repo.
+/output/
+/output-*/
+/out/
+*.zip
+
+# planning artifacts: track docs, never data dumps
+plans/**/*.json
+plans/**/*.jsonl
+plans/**/*.csv
+
+# credentials — never commit
+*service-account*.json
+*credentials*.json
+
+# local-only project instructions (never been tracked)
 CLAUDE.md
-output.zip
-dataViewer*
-jobUser*
-test-output*
-saved*
-tmp*
-!tmp/.gitkeep
-fetch_demos.sh
+
+# browser automation artifacts
+.playwright-mcp/
