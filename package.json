@@ -1,5 +1,5 @@
 {
-	"name": "ak-audit",
+	"name": "@ak--47/ak-audit",
 	"version": "2.0.0",
 	"type": "module",
 	"description": "Map a BigQuery dataset for agents and humans: metadata, column stats, relationships, usage, and a searchable report",
@@ -20,6 +20,9 @@
 		"url": "https://github.com/ak--47/ak-audit/issues"
 	},
 	"homepage": "https://github.com/ak--47/ak-audit#readme",
+	"publishConfig": {
+		"access": "public"
+	},
 	"bin": {
 		"ak-audit": "dist/cli.js"
 	},

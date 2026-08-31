@@ -25,4 +25,18 @@ describe('package manifest', () => {
 	it('is not marked private', () => {
 		expect(pkg.private).toBeUndefined();
 	});
+
+	it('publishes a scoped package publicly', () => {
+		// npm refuses the bare name `ak-audit` as too close to `akaudit`, so
+		// the package is scoped. A scoped package defaults to restricted
+		// access, and `npm publish` fails on a free account without this.
+		expect(pkg.name).toBe('@ak--47/ak-audit');
+		expect(pkg.publishConfig?.access).toBe('public');
+	});
+
+	it('keeps the command itself unscoped', () => {
+		// The scope is an install detail. What a person types stays `ak-audit`,
+		// which is also what --version, the docs and TOOL_VERSION describe.
+		expect(Object.keys(pkg.bin)).toEqual(['ak-audit']);
+	});
 });

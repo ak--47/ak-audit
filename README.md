@@ -20,15 +20,19 @@ Two readers, one output:
 Needs Node 22 or newer. Nothing to install:
 
 ```bash
-npx ak-audit audit my-project.my_dataset
+npx @ak--47/ak-audit audit my-project.my_dataset
 ```
 
-Install it properly if you will use it often:
+Install it once and the command is just `ak-audit`:
 
 ```bash
-npm install -g ak-audit
+npm install -g @ak--47/ak-audit
 ak-audit audit my-project.my_dataset
 ```
+
+The package is scoped because npm holds the bare name `ak-audit` too close to
+an existing `akaudit`. The command it installs is unscoped, so every example
+below reads `ak-audit`.
 
 Authentication uses Application Default Credentials:
 
@@ -41,17 +45,17 @@ To use a service-account key instead, pass `--auth key.json` to any command.
 ## Use
 
 ```bash
-npx ak-audit audit my-project.my_dataset
+ak-audit audit my-project.my_dataset
 ```
 
 That runs all four stages and prints where the report landed. Stages also run
 on their own:
 
 ```bash
-npx ak-audit extract  my-project.my_dataset   # metadata; costs ~nothing
-npx ak-audit profile  my-project.my_dataset   # column stats; costs money
-npx ak-audit analyze                          # local, free
-npx ak-audit report                           # local, free
+ak-audit extract  my-project.my_dataset   # metadata; costs ~nothing
+ak-audit profile  my-project.my_dataset   # column stats; costs money
+ak-audit analyze                          # local, free
+ak-audit report                           # local, free
 ```
 
 `analyze` and `report` read from disk, so re-running them is instant. Use that
@@ -60,14 +64,14 @@ while iterating.
 ### Know the cost before you pay it
 
 ```bash
-npx ak-audit audit my-project.my_dataset --estimate
+ak-audit audit my-project.my_dataset --estimate
 ```
 
 Dry-runs every query, prints the projected scan size and cost, and executes
 nothing.
 
 ```bash
-npx ak-audit audit my-project.my_dataset --no-profile
+ak-audit audit my-project.my_dataset --no-profile
 ```
 
 Metadata only. Effectively free, and a good first look at an unfamiliar dataset.
@@ -105,7 +109,7 @@ a later run unless `--force`.
 ### Seeing how a dataset is actually used
 
 ```bash
-npx ak-audit audit my-project.my_dataset --usage --usage-days 30
+ak-audit audit my-project.my_dataset --usage --usage-days 30
 ```
 
 Schema says what a table holds. It cannot say whether anyone reads it. With
@@ -236,8 +240,10 @@ npm version patch     # or minor / major
 npm publish
 ```
 
-`prepublishOnly` runs the typecheck, the tests and the build, so a broken
-`dist/` cannot reach npm. Only `dist/` and `README.md` are packed.
+`prepack` builds and `prepublishOnly` runs the typecheck and the tests, so a
+broken `dist/` cannot reach npm. Only `dist/`, `README.md` and `LICENSE` are
+packed. `publishConfig.access` is `public`, which a scoped package needs — its
+default is restricted.
 
 Two things to keep in step, both enforced by a test in `test/package.test.ts`:
 
