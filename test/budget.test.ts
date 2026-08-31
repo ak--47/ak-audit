@@ -136,7 +136,7 @@ describe('BudgetTracker', () => {
 		const t = new BudgetTracker({ maxBytesPerTable: 10 * GB, maxBytesTotal: 100 * GB });
 		const decision = t.check('big', 60 * GB);
 		expect(decision.allowed).toBe(false);
-		expect(decision.reason).toContain('per-table limit');
+		expect(decision.reason).toContain('per-query limit');
 	});
 
 	it('refuses once the run total would be exceeded', () => {
@@ -196,3 +196,102 @@ describe('partition literals match the column type', () => {
 		expect(plan.whereClause).toContain('TIMESTAMP "2024-06-01');
 	});
 })
+
+describe('dollar-denominated limits', () => {
+	it('converts dollars to bytes at on-demand pricing', async () => {
+		const { usdToBytes } = await import('../src/warehouse/bigquery/budget.ts');
+		// $6.25 buys exactly one TiB.
+		expect(usdToBytes(6.25)).toBeCloseTo(1024 ** 4, -6);
+	});
+
+	it('defaults to a $5 ceiling per query', async () => {
+		const { DEFAULT_LIMITS, DEFAULT_MAX_COST_PER_QUERY_USD } = await import(
+			'../src/warehouse/bigquery/budget.ts'
+		);
+		const { estimateCostUsd } = await import('../src/warehouse/bigquery/client.ts');
+		expect(estimateCostUsd(DEFAULT_LIMITS.maxBytesPerTable)).toBeCloseTo(
+			DEFAULT_MAX_COST_PER_QUERY_USD,
+			4,
+		);
+	});
+
+	it('states refusals in dollars, which is the unit people reason in', async () => {
+		const { BudgetTracker, usdToBytes } = await import('../src/warehouse/bigquery/budget.ts');
+		const t = new BudgetTracker({
+			maxBytesPerTable: usdToBytes(5),
+			maxBytesTotal: usdToBytes(25),
+		});
+		const decision = t.check('big', usdToBytes(40));
+		expect(decision.allowed).toBe(false);
+		expect(decision.reason).toContain('$40.00');
+		expect(decision.reason).toContain('$5.00 per-query limit');
+	});
+});
+
+describe('parseUsd', () => {
+	it('accepts a bare number and a dollar sign', async () => {
+		const { parseUsd } = await import('../src/config.ts');
+		expect(parseUsd('5')).toBe(5);
+		expect(parseUsd('$2.50')).toBe(2.5);
+	});
+
+	it('rejects nonsense', async () => {
+		const { parseUsd } = await import('../src/config.ts');
+		expect(() => parseUsd('lots')).toThrow();
+		expect(() => parseUsd('-1')).toThrow();
+	});
+});
+
+describe('skipped tables cost nothing', () => {
+	it('never counts a declined estimate as money spent', async () => {
+		// A run that refuses an expensive table must not then report that
+		// table's estimate as its own cost.
+		const { runProfile } = await import('../src/stages/profile.ts');
+		const { BudgetTracker, usdToBytes } = await import('../src/warehouse/bigquery/budget.ts');
+		const { mkdtemp } = await import('node:fs/promises');
+		const { tmpdir } = await import('node:os');
+		const { join } = await import('node:path');
+
+		const dir = await mkdtemp(join(tmpdir(), 'ak-audit-skip-'));
+		const client = {
+			dryRun: async () => usdToBytes(50),
+			query: async () => {
+				throw new Error('must not run');
+			},
+		} as never;
+
+		const { profiles } = await runProfile({
+			client,
+			tables: [
+				{
+					project: 'p', dataset: 'd', table: 't', fullName: 'p.d.t', kind: 'TABLE',
+					rowCount: 10, rowCountSource: 'table-metadata', bytes: 1,
+					requirePartitionFilter: false, created: null, lastModified: null,
+					partitioning: null, clustering: [], partitions: [], ddl: null,
+					description: null, labels: {},
+					schema: [{
+						path: 'a', name: 'a', dataType: 'STRING', baseType: 'STRING',
+						mode: 'NULLABLE', isNested: false, isContainer: false,
+						isPartitioningColumn: false, clusteringPosition: null,
+					}],
+					references: [], samples: [], sampleSource: 'none', errors: [],
+				},
+			],
+			outDir: dir,
+			budget: new BudgetTracker({
+				maxBytesPerTable: usdToBytes(5),
+				maxBytesTotal: usdToBytes(25),
+			}),
+			concurrency: 1,
+			force: true,
+			estimateOnly: false,
+			partitionLookback: 3,
+			fullScan: false,
+		});
+
+		expect(profiles[0]!.skipped).toContain('per-query limit');
+		expect(profiles[0]!.bytesProcessed).toBe(0);
+		expect(profiles[0]!.estimatedCostUsd).toBe(0);
+		expect(profiles[0]!.estimatedBytesIfRun).toBeGreaterThan(0);
+	});
+});

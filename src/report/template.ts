@@ -218,6 +218,23 @@ tbody tr:hover { background: var(--plane); }
 .meter .t { font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
 
 /* ---------- misc ---------- */
+.usebar { display: flex; flex-wrap: wrap; gap: 8px; }
+.upill {
+  font-size: 12px; padding: 4px 9px; border-radius: 6px;
+  background: var(--plane); border: 1px solid var(--border); color: var(--ink-2);
+}
+.upill strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.banner {
+  padding: 9px 13px; border-radius: 8px; margin-bottom: 16px; font-size: 13px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--ink-2);
+}
+.banner.warn {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.tdesc { margin: 2px 0 10px; color: var(--ink-2); max-width: 70ch; }
 .tag {
   display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 4px;
   border: 1px solid var(--border); color: var(--ink-2); margin-left: 5px;
@@ -346,9 +363,17 @@ function score(needle, hay) {
 /* Search index: every table and every column, built once. */
 const INDEX = [];
 for (const t of DATA.tables) {
-  INDEX.push({ kind: 'table', label: t.name, sub: t.kind.toLowerCase() + ' · ' + fmtInt(t.rows) + ' rows', table: t.name });
+  // Descriptions join the searchable text, so "renewals" finds the table
+  // that is *about* renewals even when its name never says so.
+  INDEX.push({
+    kind: 'table', label: t.name, hay: t.name + ' ' + (t.desc || ''),
+    sub: t.kind.toLowerCase() + ' · ' + fmtInt(t.rows) + ' rows', table: t.name,
+  });
   for (const c of t.columns) {
-    INDEX.push({ kind: 'column', label: t.name + '.' + c.p, sub: c.t, table: t.name, column: c.p });
+    INDEX.push({
+      kind: 'column', label: t.name + '.' + c.p, hay: t.name + '.' + c.p + ' ' + (c.desc || ''),
+      sub: c.t, table: t.name, column: c.p,
+    });
   }
 }
 
@@ -384,7 +409,7 @@ function openPalette() {
   function refresh() {
     const q = input.value.trim();
     results = (q
-      ? INDEX.map(e => ({ e, s: score(q, e.label) })).filter(r => r.s > 0)
+      ? INDEX.map(e => ({ e, s: Math.max(score(q, e.label), score(q, e.hay) - 40) })).filter(r => r.s > 0)
           .sort((a, b) => b.s - a.s).slice(0, 60).map(r => r.e)
       : INDEX.filter(e => e.kind === 'table').slice(0, 60));
     sel = 0;
@@ -480,6 +505,7 @@ function renderSide() {
       '<button class="titem" data-t="' + esc(t.name) + '" aria-current="' + (t.name === current) + '">' +
       '<div class="tn">' + esc(t.name) + '</div><div class="tm"><span>' + fmtInt(t.rows) + ' rows</span>' +
       '<span>' + t.columns.length + ' cols</span>' +
+      (t.usage ? '<span title="queries">' + fmtInt(t.usage.queries) + 'q</span>' : '') +
       (t.kind !== 'TABLE' ? '<span class="pill">view</span>' : '') + '</div></button>').join('')
       : '<div class="empty">No match</div>') + '</nav></aside>';
 }
@@ -498,8 +524,12 @@ function renderTable(t) {
   if (t.clustering.length) meta.push('clustered by ' + t.clustering.map(esc).join(', '));
   if (t.lastModified) meta.push('modified ' + esc(t.lastModified.slice(0, 10)));
 
-  let html = '<h2>' + esc(t.name) + '<span class="tag">' + esc(t.kind.toLowerCase().replace('_',' ')) + '</span></h2>' +
-    '<div class="tm" style="color:var(--muted);margin:-4px 0 14px">' + meta.join(' · ') + '</div>';
+  let html = '<h2>' + esc(t.name) + '<span class="tag">' + esc(t.kind.toLowerCase().replace('_',' ')) + '</span></h2>';
+  if (t.desc) html += '<p class="tdesc">' + esc(t.desc) + '</p>';
+  html += '<div class="tm" style="color:var(--muted);margin:-4px 0 14px">' + meta.join(' · ') + '</div>';
+  if (Object.keys(t.labels || {}).length)
+    html += '<div style="margin:-8px 0 14px">' + Object.entries(t.labels)
+      .map(([k,v]) => '<span class="tag">' + esc(k) + '=' + esc(v) + '</span>').join(' ') + '</div>';
 
   if (t.findings.length) {
     html += '<ul class="notes">' + t.findings.map(f =>
@@ -510,12 +540,13 @@ function renderTable(t) {
   html += '<div class="card"><div class="card-head">Query it<button class="ghost copy" data-copy="prev">Copy SQL</button></div>' +
     '<pre class="sql">' + esc(t.sql) + '</pre></div>';
 
+  const hasDesc = t.columns.some(c => c.desc);
   html += '<h3>Columns</h3><div class="card scroll"><table class="cols">' +
     '<colgroup><col style="width:21%"><col style="width:12%"><col style="width:10%">' +
     '<col style="width:11%"><col style="width:9%"><col style="width:16%"><col style="width:21%"></colgroup>' +
     '<thead><tr>' +
     '<th>Column</th><th>Type</th><th>Role</th><th class="num">Null</th><th class="num">Distinct</th>' +
-    '<th>Range</th><th>Common values</th></tr></thead><tbody>' +
+    '<th>' + (hasDesc ? 'Description' : 'Range') + '</th><th>Common values</th></tr></thead><tbody>' +
     t.columns.map(c => {
       const flags = (c.part ? '<span class="tag">part</span>' : '') + (c.clus ? '<span class="tag">clus</span>' : '') +
         (c.rep ? '<span class="tag">array</span>' : '');
@@ -526,7 +557,8 @@ function renderTable(t) {
         '<td style="color:var(--muted)">' + esc(c.r) + '</td>' +
         '<td class="num">' + nullMeter(c.n) + '</td>' +
         '<td class="num">' + fmtInt(c.d) + '</td>' +
-        '<td class="clip" style="font-size:12px;color:var(--ink-2)" title="' + esc(range) + '">' + range + '</td>' +
+        '<td class="clip" style="font-size:12px;color:var(--ink-2)" title="' + esc(hasDesc ? (c.desc || range) : range) + '">' +
+          esc(hasDesc ? (c.desc || '—') : '') + (hasDesc ? '' : range) + '</td>' +
         '<td>' + topValues(c) + '</td></tr>';
     }).join('') + '</tbody></table></div>' +
     '<div style="color:var(--muted);font-size:12px;margin-top:6px">' + esc(t.profileNote) + '</div>';
@@ -555,6 +587,33 @@ function renderTable(t) {
       (t.reads.length ? '<div>Reads: ' + t.reads.map(r => '<a href="#" data-goto="' + esc(r) + '">' + esc(r) + '</a>').join(', ') + '</div>' : '') +
       (t.readBy.length ? '<div>Read by: ' + t.readBy.map(r => '<a href="#" data-goto="' + esc(r) + '">' + esc(r) + '</a>').join(', ') + '</div>' : '') +
       '</div></div>';
+  }
+
+  if (t.usage) {
+    const u = t.usage;
+    html += '<h3>How it is used</h3><div class="card"><div style="padding:12px 14px">' +
+      '<div class="usebar">' +
+      usePill(fmtInt(u.queries), 'queries') + usePill(fmtInt(u.users), 'readers') +
+      usePill(fmtBytes(u.bytes), 'scanned') + usePill((u.last||'').slice(0,10) || '—', 'last read') +
+      '</div>' +
+      (u.detection === 'named-in-sql'
+        ? '<div style="color:var(--muted);font-size:12px;margin-top:8px">Matched by name in query text. A view never appears in BigQuery\'s referenced tables, so this is approximate.</div>'
+        : '') +
+      (u.topUsers.length ? '<div style="margin-top:10px;font-size:13px"><strong>Top readers:</strong> ' +
+        u.topUsers.slice(0,5).map(x => esc(x.user) + ' (' + fmtInt(x.queries) + ')').join(', ') + '</div>' : '') +
+      (u.coAccessed.length ? '<div style="margin-top:8px;font-size:13px"><strong>Queried alongside:</strong> ' +
+        u.coAccessed.slice(0,6).map(c => '<a href="#" data-goto="' + esc(c.table) + '">' + esc(c.table) +
+        '</a> (' + fmtInt(c.queries) + ')').join(', ') + '</div>' : '') +
+      '</div></div>';
+    if (u.examples.length) {
+      html += '<div class="card"><details class="samples"><summary>' + u.examples.length +
+        ' example quer' + (u.examples.length===1?'y':'ies') + ' people actually ran</summary>' +
+        u.examples.map(e => '<div class="card-head" style="border-top:1px solid var(--grid)">' +
+          esc(e.user || 'unknown') + ' · ' + esc((e.at||'').slice(0,16)) +
+          '<button class="ghost copy" data-copy="' + esc(e.sql) + '">Copy</button></div>' +
+          '<pre class="sql">' + esc(e.sql.trim()) + '</pre>').join('') +
+        '</details></div>';
+    }
   }
 
   if (t.samples.length) {
@@ -588,7 +647,11 @@ function render() {
       tile(fmtInt(totals.columns), 'columns') +
       tile(fmtInt(totals.relationships), 'relationships') +
       tile(fmtBytes(totals.bytesScanned), 'scanned to profile') +
-    '</div>' + renderTable(t) + '</div></div></div>';
+      (DATA.usageScope
+        ? tile(fmtInt(DATA.tables.reduce((s,x) => s + (x.usage ? x.usage.queries : 0), 0)),
+               'queries in ' + DATA.usageDays + 'd')
+        : '') +
+    '</div>' + usageBanner() + renderTable(t) + '</div></div></div>';
 
   document.getElementById('open-pal').onclick = openPalette;
   document.getElementById('theme').onclick = () => {
@@ -610,6 +673,25 @@ function render() {
   app.querySelectorAll('[data-goto]').forEach(a => {
     a.onclick = e => { e.preventDefault(); select(a.dataset.goto, a.dataset.gotocol); };
   });
+}
+
+function usePill(v, l) {
+  return '<span class="upill"><strong>' + v + '</strong> ' + l + '</span>';
+}
+
+/* A caller-only history answers a different question from a project-wide
+   one, so the report says which it is rather than implying coverage. */
+function usageBanner() {
+  if (!DATA.usageScope) return '';
+  const scoped = DATA.usageScope === 'user';
+  const unused = DATA.unusedTables.length;
+  return '<div class="banner' + (scoped ? ' warn' : '') + '">' +
+    (scoped
+      ? 'Query history covers <strong>only your own queries</strong> — project-wide history needs bigquery.jobs.listAll. Treat "unread" with care.'
+      : 'Query history covers <strong>all users</strong>, last ' + DATA.usageDays + ' days.') +
+    (unused ? ' <strong>' + unused + '</strong> table(s) went unread: ' +
+      DATA.unusedTables.slice(0,12).map(esc).join(', ') + (unused>12?' …':'') : '') +
+    '</div>';
 }
 
 function tile(v, l) {

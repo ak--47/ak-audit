@@ -233,7 +233,7 @@ describe('counting is gated by the run total, not the profile cap', () => {
 			countBudgetBytes: 1e15,
 			budget,
 		});
-		expect(r.error).toContain('total limit');
+		expect(r.error).toContain('past its');
 		expect((client as unknown as { query: ReturnType<typeof vi.fn> }).query).not.toHaveBeenCalled();
 	});
 });

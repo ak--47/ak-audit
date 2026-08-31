@@ -150,3 +150,33 @@ describe('formatRate', () => {
 		expect(formatRate(null)).toBe('—');
 	});
 });
+
+describe('temporal names do not override numeric types', () => {
+	it('treats an INT64 count as a measure despite a temporal-sounding name', () => {
+		// `total_calls_logged` read as a timestamp because its name ends in
+		// "_logged", which is nonsense for an integer count.
+		expect(
+			classifyColumn(
+				field({ path: 'total_calls_logged', baseType: 'INT64' }),
+				stats({ path: 'total_calls_logged', ndv: 400 }),
+				10000,
+			),
+		).toBe('measure');
+	});
+
+	it('still calls a STRING date column a timestamp by name', () => {
+		expect(
+			classifyColumn(
+				field({ path: 'created_at', baseType: 'STRING' }),
+				stats({ path: 'created_at', ndv: 9000 }),
+				10000,
+			),
+		).toBe('timestamp');
+	});
+
+	it('always trusts a real temporal type', () => {
+		expect(
+			classifyColumn(field({ path: 'anything', baseType: 'TIMESTAMP' }), undefined, null),
+		).toBe('timestamp');
+	});
+});

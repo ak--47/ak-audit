@@ -80,7 +80,7 @@ export async function runProfile(options: ProfileOptions): Promise<ProfileResult
 			estimateOnly,
 		});
 
-		estimatedBytes += profile.bytesProcessed;
+		estimatedBytes += estimateOnly ? profile.estimatedBytesIfRun : profile.bytesProcessed;
 		if (!estimateOnly) await writeJson(path, profile);
 		return profile;
 	});
@@ -106,6 +106,7 @@ async function profileTable(args: ProfileTableArgs): Promise<TableProfile> {
 		strategyDetail: plan.detail,
 		bytesProcessed: 0,
 		estimatedCostUsd: 0,
+		estimatedBytesIfRun: 0,
 		rowsScanned: null,
 		chunks: 0,
 		columns: {},
@@ -151,10 +152,11 @@ async function profileTable(args: ProfileTableArgs): Promise<TableProfile> {
 	const decision = budget.check(table.table, estimate);
 	if (!decision.allowed) {
 		log.warn(`${table.table} skipped — ${decision.reason}`);
+		// Nothing ran, so nothing was spent. The estimate is recorded
+		// separately rather than counted as cost.
 		return {
 			...empty,
-			bytesProcessed: estimate,
-			estimatedCostUsd: estimateCostUsd(estimate),
+			estimatedBytesIfRun: estimate,
 			skipped: decision.reason,
 		};
 	}
@@ -167,8 +169,7 @@ async function profileTable(args: ProfileTableArgs): Promise<TableProfile> {
 		return {
 			...empty,
 			strategy: plan.strategy,
-			bytesProcessed: estimate,
-			estimatedCostUsd: estimateCostUsd(estimate),
+			estimatedBytesIfRun: estimate,
 			chunks: chunks.length,
 		};
 	}
@@ -210,6 +211,7 @@ async function profileTable(args: ProfileTableArgs): Promise<TableProfile> {
 		strategyDetail: plan.detail,
 		bytesProcessed: bytes,
 		estimatedCostUsd: estimateCostUsd(bytes),
+		estimatedBytesIfRun: estimate,
 		rowsScanned,
 		chunks: chunks.length,
 		columns,

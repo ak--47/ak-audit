@@ -73,18 +73,55 @@ Metadata only. Effectively free, and a good first look at an unfamiliar dataset.
 | `--out <dir>` | `./output` | Output directory |
 | `--tables <list>` | all | Comma-separated names or globs, e.g. `events*,users` |
 | `--location <loc>` | detected | Dataset region |
-| `--samples <n>` | 20 | Sample rows per table |
-| `--max-bytes-per-table <size>` | `50GB` | Skip a table's profile above this |
-| `--max-bytes-total <size>` | `500GB` | Stop profiling above this |
+| `--samples <n>` | 20 | Sample rows per table. `0` skips sampling entirely |
+| `--max-cost <usd>` | `5` | Ceiling on what any one query may cost |
+| `--max-total-cost <usd>` | `25` | Ceiling on what the whole run may cost |
 | `--partitions <n>` | 3 | Recent partitions to profile |
+| `--usage` | off | Read query history (see below) |
+| `--usage-days <n>` | 30 | Query-history window |
+| `--no-query-text` | off | Omit example SQL from usage output |
 | `--full` | off | Scan whole tables instead of pruning or sampling |
 | `--concurrency <n>` | 8 | Tables in parallel |
 | `--force` | off | Re-fetch tables already on disk |
 | `--estimate` | off | Dry run only; print cost, execute nothing |
 | `--no-profile` | off | Skip column statistics |
 
+Limits are set in dollars, because that is the unit worth reasoning in. Every
+query is dry-run first and refused if it would exceed `--max-cost`. A refused
+table is reported as declined, and never counted as money spent. If you would
+rather think in scan size, `--max-bytes-per-table` and `--max-bytes-total`
+override the dollar flags.
+
 Runs resume. Per-table files are written as each table finishes and skipped on
 a later run unless `--force`.
+
+### Seeing how a dataset is actually used
+
+```bash
+npx tsx src/cli.ts audit my-project.my_dataset --usage --usage-days 30
+```
+
+Schema says what a table holds. It cannot say whether anyone reads it. With
+`--usage`, ak-audit reads BigQuery's job history and adds, per table: how many
+times it was queried, by how many people, who those people are, how much they
+scanned, when it was last read, which tables get queried alongside it, and real
+example queries.
+
+It also lists the tables nobody read at all in the window, which is usually the
+most actionable thing in the report.
+
+Two honesty notes, both surfaced in the output rather than buried:
+
+- **Project-wide history needs `bigquery.jobs.listAll`.** Without it, ak-audit
+  falls back to your own queries only and says so, because "nobody queries this"
+  and "I have not queried this" are very different claims.
+- **A view never appears in BigQuery's referenced tables** — querying one
+  resolves to its underlying tables. Views are matched by name in the query text
+  instead, which is approximate and labelled as such. Without this every view
+  looks dead.
+
+Query history is not free metadata: roughly $0.013 per day of window. It obeys
+`--max-cost` like anything else.
 
 ## What you get
 
@@ -94,6 +131,7 @@ output/
   overview.md            shape, relationships, warnings
   ddl.sql                every CREATE statement
   manifest.json          run config, cost, and anything skipped and why
+  usage.json             query history, if --usage was set
   raw/<table>.json       schema, partitions, lineage, samples
   profile/<table>.json   per-column statistics
   analysis/
@@ -106,8 +144,11 @@ output/
 
 Four stages. Only the first two talk to BigQuery.
 
-**extract** reads `INFORMATION_SCHEMA`, storage metadata, and DDL, and gets view
-lineage by dry-running each view — which is exact and costs nothing, unlike
+**extract** reads `INFORMATION_SCHEMA`, storage metadata, DDL, and any
+hand-written table and column descriptions the warehouse carries — those are
+the richest free context available, and they are indexed in the report's search
+so you can find a table by what it is *about*. It gets view lineage by
+dry-running each view — which is exact and costs nothing, unlike
 parsing SQL with regexes. Sample rows come from the storage endpoint, which
 scans zero bytes.
 

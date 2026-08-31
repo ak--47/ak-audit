@@ -11,14 +11,20 @@ export interface CommonOptions {
 	tables?: string;
 	samples: string;
 	concurrency: string;
-	maxBytesPerTable: string;
-	maxBytesTotal: string;
+	maxBytesPerTable?: string;
+	maxBytesTotal?: string;
 	partitions: string;
 	force?: boolean;
 	quiet?: boolean;
 	noProfile?: boolean;
 	exactRows?: boolean;
 	countBudget?: string;
+	maxCost?: string;
+	maxTotalCost?: string;
+	usage?: boolean;
+	usageDays?: string;
+	usageMaxBytes?: string;
+	queryText?: boolean;
 	estimate?: boolean;
 	full?: boolean;
 }
@@ -73,6 +79,13 @@ export function buildTableFilter(spec: string | undefined): ((name: string) => b
 			),
 	);
 	return (name: string) => regexes.some((r) => r.test(name));
+}
+
+/** Parses `$5`, `5`, `2.50` into dollars. */
+export function parseUsd(input: string): number {
+	const n = Number(String(input).trim().replace(/^\$/, ''));
+	if (!Number.isFinite(n) || n < 0) throw new Error(`Cannot read a dollar amount from "${input}"`);
+	return n;
 }
 
 /** Parses `50GB`, `2.5TB`, `1024`, and similar. */

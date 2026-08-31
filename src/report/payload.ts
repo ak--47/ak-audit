@@ -15,6 +15,7 @@ import type {
 	TableProfile,
 } from '../types.ts';
 import { buildStarterQuery } from '../output/markdown.ts';
+import type { UsageResult } from '../warehouse/bigquery/usage.ts';
 
 /** Sample rows embedded per table. */
 export const MAX_SAMPLE_ROWS = 12;
@@ -42,6 +43,8 @@ export interface ReportColumn {
 	clus: boolean;
 	nest: boolean;
 	rep: boolean;
+	/** Hand-written column description, when the warehouse carries one. */
+	desc: string | null;
 }
 
 export interface ReportRelation {
@@ -54,10 +57,23 @@ export interface ReportRelation {
 	direction: 'out' | 'in';
 }
 
+export interface ReportUsage {
+	queries: number;
+	users: number;
+	bytes: number;
+	last: string | null;
+	detection: string;
+	topUsers: { user: string; queries: number }[];
+	coAccessed: { table: string; queries: number }[];
+	examples: { user: string | null; at: string | null; sql: string }[];
+}
+
 export interface ReportTable {
 	name: string;
 	full: string;
 	kind: string;
+	desc: string | null;
+	labels: Record<string, string>;
 	rows: number | null;
 	bytes: number | null;
 	lastModified: string | null;
@@ -74,11 +90,16 @@ export interface ReportTable {
 	sql: string;
 	ddl: string | null;
 	profileNote: string;
+	usage: ReportUsage | null;
 }
 
 export interface ReportPayload {
 	dataset: string;
 	generatedAt: string;
+	usageScope: string | null;
+	usageDays: number | null;
+	usageNote: string | null;
+	unusedTables: string[];
 	totals: {
 		tables: number;
 		views: number;
@@ -110,6 +131,7 @@ export function buildPayload(
 	analysis: AnalysisResult,
 	tables: TableMeta[],
 	profiles: TableProfile[],
+	usage?: UsageResult | null,
 ): ReportPayload {
 	const metaByName = new Map(tables.map((t) => [t.fullName, t]));
 	const profileByName = new Map(profiles.map((p) => [p.table, p]));
@@ -149,6 +171,7 @@ export function buildPayload(
 					clus: f.clusteringPosition !== null,
 					nest: f.isNested,
 					rep: f.mode === 'REPEATED',
+					desc: f.description ?? null,
 				};
 			});
 
@@ -174,6 +197,8 @@ export function buildPayload(
 			name: meta.table,
 			full: meta.fullName,
 			kind: meta.kind,
+			desc: meta.description,
+			labels: meta.labels ?? {},
 			rows: meta.rowCount,
 			bytes: meta.bytes,
 			lastModified: meta.lastModified,
@@ -194,6 +219,27 @@ export function buildPayload(
 			profileNote: profile?.skipped
 				? `Not profiled: ${profile.skipped}`
 				: (profile?.strategyDetail ?? 'Not profiled'),
+			usage: (() => {
+				const u = usage?.tables?.[meta.table];
+				if (!u) return null;
+				return {
+					queries: u.queries,
+					users: u.users,
+					bytes: u.bytesScanned,
+					last: u.lastQueried,
+					detection: u.detection,
+					topUsers: u.topUsers.slice(0, 8),
+					coAccessed: u.coAccessed.slice(0, 8).map((c) => ({
+						table: short(c.table),
+						queries: c.queries,
+					})),
+					examples: u.examples.slice(0, 3).map((e) => ({
+						user: e.user,
+						at: e.at,
+						sql: e.sql,
+					})),
+				};
+			})(),
 		};
 	});
 
@@ -204,6 +250,10 @@ export function buildPayload(
 	return {
 		dataset: analysis.dataset,
 		generatedAt: analysis.generatedAt,
+		usageScope: usage && usage.scope !== 'unavailable' ? usage.scope : null,
+		usageDays: usage?.windowDays ?? null,
+		usageNote: usage?.note ?? null,
+		unusedTables: usage?.unusedTables ?? [],
 		totals: {
 			tables: reportTables.filter((t) => t.kind === 'TABLE').length,
 			views: reportTables.filter((t) => t.kind !== 'TABLE').length,

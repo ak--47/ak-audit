@@ -20,7 +20,7 @@
  */
 
 import type { PartitionInfo, PartitioningConfig, ScanStrategy } from '../../types.ts';
-import { estimateCostUsd, formatBytes } from './client.ts';
+import { estimateCostUsd, formatBytes, USD_PER_TIB } from './client.ts';
 import { quotePath } from './profileSql.ts';
 
 export interface BudgetLimits {
@@ -30,8 +30,22 @@ export interface BudgetLimits {
 	maxBytesTotal: number;
 }
 
+/**
+ * Default ceiling on what any one query may cost, in US dollars.
+ *
+ * Money is the unit people actually reason in. Bytes are the unit BigQuery
+ * bills in, and the conversion is not something anyone should have to do in
+ * their head to know whether a run is safe.
+ */
+export const DEFAULT_MAX_COST_PER_QUERY_USD = 5;
+
+/** Bytes a dollar figure corresponds to at on-demand pricing. */
+export function usdToBytes(usd: number): number {
+	return (usd / USD_PER_TIB) * 1024 ** 4;
+}
+
 export const DEFAULT_LIMITS: BudgetLimits = {
-	maxBytesPerTable: 50 * 1024 ** 3, // 50 GB
+	maxBytesPerTable: usdToBytes(DEFAULT_MAX_COST_PER_QUERY_USD),
 	maxBytesTotal: 500 * 1024 ** 3, // 500 GB
 };
 
@@ -251,17 +265,18 @@ export class BudgetTracker {
 			return {
 				allowed: false,
 				reason:
-					`would scan ${formatBytes(estimatedBytes)} ` +
-					`(~$${estimateCostUsd(estimatedBytes).toFixed(2)}), ` +
-					`over the ${formatBytes(this.limits.maxBytesPerTable)} per-table limit`,
+					`would cost ~$${estimateCostUsd(estimatedBytes).toFixed(2)} ` +
+					`(${formatBytes(estimatedBytes)}), over the ` +
+					`$${estimateCostUsd(this.limits.maxBytesPerTable).toFixed(2)} per-query limit`,
 			};
 		}
 		if (this.spent + estimatedBytes > this.limits.maxBytesTotal) {
 			return {
 				allowed: false,
 				reason:
-					`would push the run past its ${formatBytes(this.limits.maxBytesTotal)} ` +
-					`total limit (${formatBytes(this.spent)} already used)`,
+					`would push the run past its ` +
+					`$${estimateCostUsd(this.limits.maxBytesTotal).toFixed(2)} total ` +
+					`(~$${estimateCostUsd(this.spent).toFixed(2)} already spent)`,
 			};
 		}
 		return { allowed: true, reason: `${table}: ${formatBytes(estimatedBytes)}` };
@@ -280,8 +295,9 @@ export class BudgetTracker {
 			return {
 				allowed: false,
 				reason:
-					`would push the run past its ${formatBytes(this.limits.maxBytesTotal)} ` +
-					`total limit (${formatBytes(this.spent)} already used)`,
+					`would push the run past its ` +
+					`$${estimateCostUsd(this.limits.maxBytesTotal).toFixed(2)} total ` +
+					`(~$${estimateCostUsd(this.spent).toFixed(2)} already spent)`,
 			};
 		}
 		return { allowed: true, reason: formatBytes(estimatedBytes) };

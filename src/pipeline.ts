@@ -18,6 +18,7 @@ import type {
 } from './types.ts';
 import { layout, readJson, writeJson, writeText } from './output/writers.ts';
 import { renderCatalog, renderOverview, renderTablePage } from './output/markdown.ts';
+import type { UsageResult } from './warehouse/bigquery/usage.ts';
 
 export const TOOL_VERSION = '2.0.0';
 
@@ -59,6 +60,7 @@ export async function writeAnalysis(
 	analysis: AnalysisResult,
 	tables: TableMeta[],
 	profiles: TableProfile[],
+	usage?: UsageResult | null,
 ): Promise<void> {
 	const dirs = layout(outDir);
 	const byName = new Map(tables.map((t) => [t.fullName, t]));
@@ -73,7 +75,7 @@ export async function writeAnalysis(
 	});
 	await writeJson(join(dirs.analysis, 'analysis.json'), analysis);
 	await writeText(join(dirs.root, 'catalog.md'), renderCatalog(analysis, tables));
-	await writeText(join(dirs.root, 'overview.md'), renderOverview(analysis, tables, profiles));
+	await writeText(join(dirs.root, 'overview.md'), renderOverview(analysis, tables, profiles, usage));
 
 	// A single DDL file is free to produce and is exactly what an agent
 	// writing SQL wants to read first.
@@ -94,6 +96,9 @@ export async function writeAnalysis(
 				profile: profileByName.get(meta.fullName),
 				joins: analysis.joins,
 				shortName,
+				usage: usage?.tables?.[meta.table],
+				usageScope: usage?.scope,
+				usageDays: usage?.windowDays,
 			}),
 		);
 	}
@@ -126,6 +131,9 @@ export async function writeManifest(outDir: string, input: ManifestInput): Promi
 		tablesSkipped: input.profiles
 			.filter((p) => p.skipped)
 			.map((p) => ({ table: p.table, reason: p.skipped! })),
+		bytesDeclined: input.profiles
+			.filter((p) => p.skipped)
+			.reduce((sum, p) => sum + p.estimatedBytesIfRun, 0),
 		bytesProcessed,
 		estimatedCostUsd: (bytesProcessed / 1024 ** 4) * 6.25,
 		stages: input.stages,

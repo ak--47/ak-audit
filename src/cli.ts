@@ -13,15 +13,17 @@ import {
 	parseBytes,
 	parseIntOption,
 	parseTarget,
+	parseUsd,
 	type CommonOptions,
 } from './config.ts';
 import { BigQueryClient, estimateCostUsd, formatBytes } from './warehouse/bigquery/client.ts';
-import { BudgetTracker } from './warehouse/bigquery/budget.ts';
+import { BudgetTracker, usdToBytes } from './warehouse/bigquery/budget.ts';
 import { detectJoins, tablePairKey } from './warehouse/bigquery/sketches.ts';
 import { selectJoinCandidates } from './analyze/candidates.ts';
 import { runExtract } from './stages/extract.ts';
 import { runProfile } from './stages/profile.ts';
 import { runAnalyze } from './stages/analyze.ts';
+import { loadUsage, runUsage } from './stages/usage.ts';
 import { buildReport } from './report/build.ts';
 import {
 	loadJoins,
@@ -57,9 +59,15 @@ function common(cmd: Command): Command {
 		.option('-s, --samples <n>', 'sample rows per table', DEFAULTS.samples)
 		.option('-c, --concurrency <n>', 'tables processed in parallel', DEFAULTS.concurrency)
 		.option('--partitions <n>', 'recent partitions to profile', DEFAULTS.partitions)
-		.option('--max-bytes-per-table <size>', 'skip a table above this scan size', '50GB')
-		.option('--max-bytes-total <size>', 'stop profiling above this total', '500GB')
+		.option('--max-cost <usd>', 'ceiling on what any one query may cost', '5')
+		.option('--max-total-cost <usd>', 'ceiling on what the whole run may cost', '25')
+		.option('--max-bytes-per-table <size>', 'per-query ceiling as bytes (overrides --max-cost)')
+		.option('--max-bytes-total <size>', 'run ceiling as bytes (overrides --max-total-cost)')
 		.option('--full', 'scan whole tables instead of pruning or sampling')
+		.option('--usage', 'read query history: who queries what, and what goes unread')
+		.option('--usage-days <n>', 'query-history window in days', '30')
+		.option('--usage-max-bytes <size>', 'ceiling on the query-history scan', '150GB')
+		.option('--no-query-text', 'omit example SQL from usage output')
 		.option('--no-exact-rows', 'skip the COUNT(*) fallback used for views')
 		.option('--count-budget <size>', 'ceiling on one exact row count', '20GB')
 		.option('-f, --force', 're-fetch tables already on disk')
@@ -106,9 +114,15 @@ async function openSession(target: string | undefined, options: CommonOptions): 
 		client,
 		project,
 		dataset,
+		// Dollars are the primary interface; the byte flags stay as an escape
+		// hatch for anyone who would rather think in scan size.
 		budget: new BudgetTracker({
-			maxBytesPerTable: parseBytes(options.maxBytesPerTable),
-			maxBytesTotal: parseBytes(options.maxBytesTotal),
+			maxBytesPerTable: options.maxBytesPerTable
+				? parseBytes(options.maxBytesPerTable)
+				: usdToBytes(parseUsd(options.maxCost ?? '5')),
+			maxBytesTotal: options.maxBytesTotal
+				? parseBytes(options.maxBytesTotal)
+				: usdToBytes(parseUsd(options.maxTotalCost ?? '25')),
 		}),
 		concurrency: parseIntOption(options.concurrency, 'concurrency') || 8,
 		samples: parseIntOption(options.samples, 'samples'),
@@ -162,6 +176,18 @@ common(program.command('profile'))
 		await timed('profile', () => profileStage(session, tables, options));
 	});
 
+common(program.command('usage'))
+	.argument('<target>', 'project.dataset')
+	.description('Read query history: who queries what, and which tables go unread.')
+	.action(async (target: string, options: CommonOptions) => {
+		const session = await openSession(target, options);
+		const tables = await loadTables(options.out);
+		if (tables.length === 0) {
+			throw new Error(`No extracted tables in ${options.out}. Run "ak-audit extract" first.`);
+		}
+		await timed('usage', () => usageStage(session, tables, options));
+	});
+
 common(program.command('analyze'))
 	.description('Build relationships and write agent-facing docs. Local and free.')
 	.action(async (options: CommonOptions) => {
@@ -194,6 +220,8 @@ common(program.command('audit', { isDefault: true }))
 		const { profiles, joins } = wantProfile
 			? await timed('profile', () => profileStage(session, tables, options))
 			: { profiles: [], joins: [] };
+
+		if (options.usage) await timed('usage', () => usageStage(session, tables, options));
 
 		if (options.estimate) {
 			log.step('Estimate only — nothing was executed');
@@ -229,7 +257,11 @@ common(program.command('audit', { isDefault: true }))
 				`${((Date.now() - started) / 1000).toFixed(1)}s`,
 		);
 		if (manifest.tablesSkipped.length > 0) {
-			log.warn(`${manifest.tablesSkipped.length} table(s) skipped; see manifest.json`);
+			log.warn(
+				`${manifest.tablesSkipped.length} table(s) skipped, declining ` +
+					`${formatBytes(manifest.bytesDeclined)} ` +
+					`(~$${((manifest.bytesDeclined / 1024 ** 4) * 6.25).toFixed(2)}); see manifest.json`,
+			);
 		}
 		log.plain('');
 		log.plain(`  Report:  ${color.bold(join(options.out, 'report', 'index.html'))}`);
@@ -248,7 +280,9 @@ async function extractStage(session: Session, options: CommonOptions) {
 		force: session.force,
 		// Commander maps --no-exact-rows to exactRows: false.
 		exactRowCounts: (options as unknown as { exactRows?: boolean }).exactRows !== false,
-		countBudgetBytes: parseBytes(options.countBudget ?? '20GB'),
+		countBudgetBytes: options.countBudget
+			? parseBytes(options.countBudget)
+			: usdToBytes(parseUsd(options.maxCost ?? '5')),
 		budget: session.budget,
 	});
 }
@@ -303,6 +337,27 @@ async function profileStage(
 	return { profiles, joins };
 }
 
+async function usageStage(
+	session: Session,
+	tables: Awaited<ReturnType<typeof loadTables>>,
+	options: CommonOptions,
+) {
+	return runUsage({
+		client: session.client,
+		dataset: session.dataset,
+		location: session.client.location ?? 'US',
+		tables,
+		outDir: options.out,
+		days: parseIntOption(options.usageDays ?? '30', 'usage-days') || 30,
+		budget: session.budget,
+		maxBytes: options.usageMaxBytes
+			? parseBytes(options.usageMaxBytes)
+			: usdToBytes(parseUsd(options.maxCost ?? '5')),
+		// Commander maps --no-query-text to queryText: false.
+		includeQueryText: (options as unknown as { queryText?: boolean }).queryText !== false,
+	});
+}
+
 async function analyzeStage(
 	options: CommonOptions,
 	preloaded?: {
@@ -321,7 +376,8 @@ async function analyzeStage(
 	log.step('Analyzing');
 	const dataset = `${tables[0]!.project}.${tables[0]!.dataset}`;
 	const analysis = runAnalyze({ dataset, tables, profiles, joins });
-	await writeAnalysis(options.out, analysis, tables, profiles);
+	const usage = await loadUsage(options.out);
+	await writeAnalysis(options.out, analysis, tables, profiles, usage);
 
 	log.info(
 		`${analysis.tables.length} tables, ${analysis.joins.length} relationships, ` +

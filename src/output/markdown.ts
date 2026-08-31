@@ -19,6 +19,7 @@ import type {
 import { formatBytes } from '../warehouse/bigquery/client.ts';
 import { quotePath } from '../warehouse/bigquery/profileSql.ts';
 import { formatRate } from '../util/format.ts';
+import type { TableUsage, UsageResult } from '../warehouse/bigquery/usage.ts';
 
 function num(n: number | null | undefined): string {
 	return n === null || n === undefined ? '—' : n.toLocaleString();
@@ -50,8 +51,8 @@ export function renderCatalog(
 		'Open `analysis/tables/<table>.md` for detail, or `raw/<table>.json` and',
 		'`profile/<table>.json` for exact values.',
 		'',
-		'| Table | Kind | Rows | Size | Cols | Key columns | Related |',
-		'| --- | --- | --- | --- | --- | --- | --- |',
+		'| Table | Kind | Rows | Count from | Cols | Description |',
+		'| --- | --- | --- | --- | --- | --- |',
 	];
 
 	for (const t of [...analysis.tables].sort((a, b) => a.table.localeCompare(b.table))) {
@@ -59,9 +60,8 @@ export function renderCatalog(
 		const short = meta?.table ?? t.table;
 		lines.push(
 			`| [${short}](tables/${short}.md) | ${t.kind} | ${num(t.rowCount)} | ` +
-				`${meta?.rowCountSource ?? '—'} | ${bytes(t.bytes)} | ${t.columnCount} | ` +
-				`${escapeCell(t.keyColumns.slice(0, 3).join(', ')) || '—'} | ` +
-				`${t.relatedTables.length} |`,
+				`${meta?.rowCountSource ?? '—'} | ${t.columnCount} | ` +
+				`${meta?.description ? escapeCell(truncate(meta.description, 100)) : '—'} |`,
 		);
 	}
 	return lines.join('\n');
@@ -72,6 +72,7 @@ export function renderOverview(
 	analysis: AnalysisResult,
 	tables: TableMeta[],
 	profiles: TableProfile[],
+	usage?: UsageResult | null,
 ): string {
 	const byName = new Map(tables.map((t) => [t.fullName, t]));
 	const shortName = (full: string) => byName.get(full)?.table ?? full;
@@ -127,6 +128,44 @@ export function renderOverview(
 		lines.push('');
 	}
 
+	if (usage && usage.scope !== 'unavailable') {
+		const ranked = Object.values(usage.tables).sort((a, b) => b.queries - a.queries);
+		lines.push(
+			'## How this dataset is used',
+			'',
+			usage.scope === 'user'
+				? `Caller's own queries only, last ${usage.windowDays} days. ` +
+					'Project-wide history needs bigquery.jobs.listAll.'
+				: `All users, last ${usage.windowDays} days. ${usage.jobsSeen.toLocaleString()} queries.`,
+			'',
+			'| Table | Queries | Users | Scanned | Last read |',
+			'| --- | --- | --- | --- | --- |',
+		);
+		for (const u of ranked.slice(0, 25)) {
+			lines.push(
+				`| \`${u.table}\` | ${num(u.queries)} | ${num(u.users)} | ` +
+					`${bytes(u.bytesScanned)} | ${(u.lastQueried ?? '—').slice(0, 10)} |`,
+			);
+		}
+		lines.push('');
+		if (usage.unusedTables.length > 0) {
+			lines.push(
+				`### Not read by anyone in ${usage.windowDays} days (${usage.unusedTables.length})`,
+				'',
+				usage.unusedTables.map((t) => `\`${t}\``).join(', '),
+				'',
+			);
+		}
+		if (usage.topUsers.length > 0) {
+			lines.push(
+				'### Most active readers',
+				'',
+				...usage.topUsers.slice(0, 10).map((x) => `- ${x.user} — ${num(x.queries)} queries`),
+				'',
+			);
+		}
+	}
+
 	const warnings = analysis.findings.filter((f) => f.severity === 'warn');
 	if (warnings.length > 0) {
 		lines.push('## Warnings', '');
@@ -146,6 +185,9 @@ export interface TablePageInput {
 	profile: TableProfile | undefined;
 	joins: JoinEdge[];
 	shortName: (fullName: string) => string;
+	usage?: TableUsage | undefined;
+	usageScope?: string | undefined;
+	usageDays?: number | undefined;
 }
 
 /** Everything known about one table, including a query to start from. */
@@ -158,11 +200,27 @@ export function renderTablePage(input: TablePageInput): string {
 		'',
 		`\`${meta.fullName}\` — ${meta.kind}`,
 		'',
+	];
+
+	// The description is hand-written context and the single most useful
+	// thing on the page, so it leads rather than trails the statistics.
+	if (meta.description) lines.push(`> ${meta.description.replaceAll('\n', '\n> ')}`, '');
+	if (Object.keys(meta.labels).length > 0) {
+		lines.push(
+			'Labels: ' +
+				Object.entries(meta.labels)
+					.map(([k, v]) => `\`${k}=${v}\``)
+					.join(', '),
+			'',
+		);
+	}
+
+	lines.push(...[
 		`- Rows: ${num(meta.rowCount)} (${meta.rowCountSource})`,
 		`- Size: ${bytes(meta.bytes)}`,
 		`- Columns: ${analysis.columnCount}`,
 		`- Last modified: ${meta.lastModified ?? '—'}`,
-	];
+	]);
 
 	if (meta.partitioning) {
 		lines.push(
@@ -189,7 +247,15 @@ export function renderTablePage(input: TablePageInput): string {
 		);
 	}
 
-	lines.push('## Columns', '', '| Column | Type | Role | Null % | Distinct | Range |', '| --- | --- | --- | --- | --- | --- |');
+	const anyColumnDesc = meta.schema.some((f) => f.description);
+	lines.push(
+		'## Columns',
+		'',
+		anyColumnDesc
+			? '| Column | Type | Role | Null % | Distinct | Description |'
+			: '| Column | Type | Role | Null % | Distinct | Range |',
+		'| --- | --- | --- | --- | --- | --- |',
+	);
 	for (const field of meta.schema) {
 		if (field.isContainer) continue;
 		const s = stats[field.path];
@@ -201,7 +267,8 @@ export function renderTablePage(input: TablePageInput): string {
 			`| \`${escapeCell(field.path)}\` | ${escapeCell(field.dataType)} | ` +
 				`${analysis.roles[field.path] ?? '—'} | ` +
 				`${formatRate(s?.nullRate)} | ` +
-				`${num(s?.ndv)} | ${escapeCell(range)} |`,
+				`${num(s?.ndv)} | ` +
+				`${anyColumnDesc ? escapeCell(truncate(field.description ?? '', 90)) || '—' : escapeCell(range)} |`,
 		);
 	}
 	lines.push('');
@@ -254,6 +321,40 @@ export function renderTablePage(input: TablePageInput): string {
 			lines.push(`- ${f.column ? `\`${f.column}\` — ` : ''}${f.message}`);
 		}
 		lines.push('');
+	}
+
+	if (input.usage) {
+		const u = input.usage;
+		lines.push(
+			'## How it is used',
+			'',
+			input.usageScope === 'user'
+				? `Caller's own queries only, last ${input.usageDays} days.`
+				: `All users, last ${input.usageDays} days.`,
+			'',
+			`- Queried **${num(u.queries)}** times by **${num(u.users)}** user(s)`,
+			`- Last read: ${u.lastQueried ?? '—'}`,
+			`- Scanned ${bytes(u.bytesScanned)} in total`,
+			'',
+		);
+		if (u.topUsers.length > 0) {
+			lines.push('Top readers: ' + u.topUsers.slice(0, 5)
+				.map((x) => `${x.user} (${x.queries})`).join(', '), '');
+		}
+		if (u.coAccessed.length > 0) {
+			lines.push(
+				'Most often queried alongside:',
+				'',
+				...u.coAccessed.slice(0, 8).map((c) => `- \`${shortName(c.table)}\` — ${num(c.queries)} queries`),
+				'',
+			);
+		}
+		if (u.examples.length > 0) {
+			lines.push('### Example queries', '');
+			for (const ex of u.examples.slice(0, 3)) {
+				lines.push(`_${ex.user ?? 'unknown'} · ${(ex.at ?? '').slice(0, 16)}_`, '', '```sql', ex.sql.trim(), '```', '');
+			}
+		}
 	}
 
 	if (meta.samples.length > 0) {

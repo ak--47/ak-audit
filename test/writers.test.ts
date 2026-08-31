@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { plainValue, safeFileName, writeJson } from '../src/output/writers.ts';
 
 async function roundTrip(value: unknown): Promise<unknown> {
@@ -60,5 +60,57 @@ describe('safeFileName', () => {
 
 	it('strips path separators', () => {
 		expect(safeFileName('a/b')).not.toContain('/');
+	});
+});
+
+describe('sample limit of zero', () => {
+	it('never calls the row endpoint when sampling is disabled', async () => {
+		// maxResults 0 is treated as unset by the client and streams the whole
+		// table. On a 154-million-row table that is fatal, and it is precisely
+		// the table someone passes --samples 0 to avoid reading.
+		const { runExtract } = await import('../src/stages/extract.ts');
+		const listRows = vi.fn();
+		const dir = await mkdtemp(join(tmpdir(), 'ak-audit-s0-'));
+
+		const client = {
+			project: 'p',
+			location: 'US',
+			resolveLocation: vi.fn().mockResolvedValue('US'),
+			query: vi.fn().mockImplementation((sql: string) => {
+				if (sql.includes('INFORMATION_SCHEMA.TABLES')) {
+					return Promise.resolve({
+						rows: [
+							{ table_name: 't', table_type: 'BASE TABLE', creation_time: null, ddl: null },
+						],
+						bytesProcessed: 0,
+					});
+				}
+				return Promise.resolve({ rows: [], bytesProcessed: 0 });
+			}),
+			tableMetadata: vi.fn().mockResolvedValue({
+				numRows: 154_000_000,
+				numBytes: 1,
+				requirePartitionFilter: false,
+				created: null,
+				lastModified: null,
+			}),
+			listRows,
+			dryRun: vi.fn().mockResolvedValue(0),
+			referencedTables: vi.fn().mockResolvedValue([]),
+		} as never;
+
+		const result = await runExtract({
+			client,
+			dataset: 'd',
+			outDir: dir,
+			sampleRows: 0,
+			concurrency: 1,
+			force: true,
+			exactRowCounts: false,
+		});
+
+		expect(listRows).not.toHaveBeenCalled();
+		expect(result.tables[0]!.samples).toEqual([]);
+		expect(result.tables[0]!.sampleSource).toBe('none');
 	});
 });

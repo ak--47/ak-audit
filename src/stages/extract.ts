@@ -19,6 +19,7 @@ import {
 	fetchPartitions,
 	fetchSchemas,
 	fetchStorage,
+	fetchTableOptions,
 	listTables,
 	resolveRowCount,
 } from '../warehouse/bigquery/metadata.ts';
@@ -79,10 +80,11 @@ export async function runExtract(options: ExtractOptions): Promise<ExtractResult
 	);
 
 	// Three dataset-wide metadata reads instead of three per table.
-	const [schemas, storage, partitions] = await Promise.all([
+	const [schemas, storage, partitions, tableOptions] = await Promise.all([
 		fetchSchemas(client, dataset),
 		fetchStorage(client, dataset, location),
 		fetchPartitions(client, dataset),
+		fetchTableOptions(client, dataset),
 	]);
 
 	let reused = 0;
@@ -166,7 +168,8 @@ export async function runExtract(options: ExtractOptions): Promise<ExtractResult
 			clustering,
 			partitions: tablePartitions,
 			ddl: entry.ddl,
-			description: null,
+			description: tableOptions.get(entry.name)?.description ?? null,
+			labels: tableOptions.get(entry.name)?.labels ?? {},
 			schema: fields,
 			references,
 			samples,
@@ -201,6 +204,12 @@ async function fetchSamples(
 	budgetBytes = 20 * 1024 ** 3,
 	budget?: BudgetTracker,
 ): Promise<{ samples: Record<string, unknown>[]; source: 'rest' | 'query' | 'none'; error?: string }> {
+	// Zero means "do not sample", and it must short-circuit before any call.
+	// The row-listing endpoint treats maxResults 0 as unset and streams the
+	// whole table, which is fatal on a 154-million-row one — exactly the
+	// tables someone passes --samples 0 to avoid touching.
+	if (limit <= 0) return { samples: [], source: 'none' };
+
 	if (!isView) {
 		try {
 			const rows = await client.listRows(dataset, table, limit);

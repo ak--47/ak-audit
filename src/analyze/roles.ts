@@ -48,11 +48,16 @@ export function classifyColumn(
 		return 'categorical';
 	}
 
+	// A temporal name settles it before cardinality gets a say. A STRING
+	// `created_at` is nearly unique per row, which would otherwise make it
+	// look like an identifier. Numeric types are excluded: `total_calls_logged`
+	// is a count, and its trailing "_logged" made it read as a timestamp.
+	if (!NUMERIC_TYPES.has(type) && isTemporalName(name)) return 'timestamp';
+
 	if (uniqueness !== null && uniqueness >= IDENTIFIER_UNIQUENESS && type === 'STRING') {
 		return 'identifier';
 	}
 
-	if (isTemporalName(name)) return 'timestamp';
 	if (FLAG_PATTERN.test(name)) return 'flag';
 
 	if (NUMERIC_TYPES.has(type)) {

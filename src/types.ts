@@ -100,7 +100,10 @@ export interface TableMeta {
 	clustering: string[];
 	partitions: PartitionInfo[];
 	ddl: string | null;
+	/** Hand-written table description, the richest free context available. */
 	description: string | null;
+	/** Table labels, e.g. owner or domain tags. */
+	labels: Record<string, string>;
 	schema: SchemaField[];
 	/** Exact upstream tables, from dry-run `referencedTables`. Views only. */
 	references: string[];
@@ -148,9 +151,17 @@ export interface TableProfile {
 	strategy: ScanStrategy | null;
 	/** Human-readable account of the limit applied, shown in the report. */
 	strategyDetail: string;
-	/** Bytes BigQuery reported for the queries actually run. */
+	/** Bytes BigQuery reported for the queries actually run. Zero if skipped. */
 	bytesProcessed: number;
 	estimatedCostUsd: number;
+	/**
+	 * What the profile would have scanned, had it run.
+	 *
+	 * Kept apart from `bytesProcessed` so a skipped table never contributes
+	 * to the run's reported spend. Reporting an estimate as though it were
+	 * money spent overstates the cost of a run that deliberately declined it.
+	 */
+	estimatedBytesIfRun: number;
 	rowsScanned: number | null;
 	chunks: number;
 	columns: Record<string, ColumnStats>;
@@ -258,6 +269,8 @@ export interface RunManifest {
 	tablesExtracted: number;
 	tablesProfiled: number;
 	tablesSkipped: { table: string; reason: string }[];
+	/** What the skipped tables would have scanned. Not spent. */
+	bytesDeclined: number;
 	bytesProcessed: number;
 	estimatedCostUsd: number;
 	stages: Record<string, { ranAt: string; durationMs: number }>;
