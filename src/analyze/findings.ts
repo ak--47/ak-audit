@@ -9,6 +9,7 @@
  */
 
 import type { Finding, JoinEdge, TableMeta, TableProfile } from '../types.ts';
+import { formatRate } from '../util/format.ts';
 
 /** Days without a write after which a table is called stale. */
 export const STALE_DAYS = 90;
@@ -78,7 +79,7 @@ export function findTableFindings(
 				add(
 					'mostly-null',
 					'info',
-					`${Math.round(stats.nullRate * 100)}% null in the sampled rows.`,
+					`${formatRate(stats.nullRate)} null in the sampled rows.`,
 					stats.path,
 				);
 			}

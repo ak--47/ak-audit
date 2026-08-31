@@ -315,6 +315,48 @@ and all Mixpanel scoring, branding, and theming.
 Kept and rewritten: the pattern-matching intent of `entities.js`, and the
 staged-pipeline architecture.
 
+## What the build changed
+
+Running against a real dataset changed the design in ways the plan did not
+anticipate. Recorded here because each was a measurement, not an opinion.
+
+**Overlap alone is not evidence.** The first live run produced 2,079
+"relationships" from 16 tables, nearly all noise. Four distinct causes, each now
+filtered and each covered by a test carrying its measured numbers:
+
+1. *Mixed estimators.* Intersection was derived from `APPROX_COUNT_DISTINCT`
+   cardinalities against a union from precision-12 sketches. Inclusion-exclusion
+   only holds when all three numbers share an estimator; the mismatch turned a
+   pair sharing 6 of 100 values into apparent perfect containment. The merge
+   query now extracts both cardinalities from the sketches it merges.
+2. *Small sets inside large ones.* A 15-value `country_code` scored containment
+   1.00 against a 14,341-value `session_id`.
+3. *Integers that count from one.* Sketches compare values cast to STRING, so
+   `products.product_id` (1..1000) scored 1.00 against `rooms.room_id`
+   (1..9992), as did an `impressions` count.
+4. *Sparse children of dense keys.* Testing the smaller side for density missed
+   the common case: a child holding a subset of a generated key is itself sparse
+   (`complexTypes.room_id` fills 74% of its range) yet still sits inside any
+   dense run of the same magnitude.
+
+After filtering, 18 foreign keys remain and every one is defensible.
+
+**Names were promoted from ranking to arbitration.** The plan demoted name
+matching entirely. In practice, values cannot distinguish a real key from an
+arithmetic coincidence among integers, so agreeing names are what license a
+dense-integer pair. Names still never *create* a relationship on their own.
+
+**Sketch inlining had to be restructured.** Repeating each sketch per pair
+overflowed the 1 MB statement limit at 150 pairs. Sketches are now inlined once
+in a CTE and referenced by key, with a split-and-retry fallback.
+
+**Two bugs came from serialization and CSS, not analysis.** A JSON replacer
+meant to unwrap BigQuery's single-key date wrappers also flattened every
+`{value, count}` top-value pair to a bare string, silently discarding counts;
+and null-rate meters rendered empty because an inline `<span>` ignores width.
+Both are now regression-tested. Neither would have been caught without opening
+the report and looking at it.
+
 ## Risks
 
 | Risk | Mitigation |

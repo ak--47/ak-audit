@@ -3,8 +3,11 @@ node_modules
 .vscode
 
 # audit run output (regenerable)
-output/
-out/
+# Anchored: a bare "output/" also matches src/output/ and silently drops
+# source files from the repo.
+/output/
+/output-*/
+/out/
 *.zip
 
 # planning artifacts: track docs, never data dumps
@@ -18,3 +21,6 @@ plans/**/*.csv
 
 # local-only project instructions (never been tracked)
 CLAUDE.md
+
+# browser automation artifacts
+.playwright-mcp/

@@ -87,11 +87,20 @@ export function rankKeyColumns(
 	return fields
 		.filter((f) => !f.isContainer)
 		.map((f) => {
-			let score = 0;
-			if (roles[f.path] === 'identifier') score += 10;
+			// A column must earn its place through a real signal. Being a
+			// top-level column is a tiebreaker, never a qualification, or
+			// every measure in the table lands in the list.
+			const isIdentifier = roles[f.path] === 'identifier';
+			const isRelated = relatedColumns.has(f.path);
+			const isClustered = f.clusteringPosition !== null;
+			const qualifies = isIdentifier || isRelated || isClustered || f.isPartitioningColumn;
+			if (!qualifies) return { path: f.path, score: 0 };
+
+			let score = 1;
+			if (isIdentifier) score += 10;
 			// A confirmed relationship outweighs any naming guess.
-			if (relatedColumns.has(f.path)) score += 20;
-			if (f.clusteringPosition !== null) score += 8;
+			if (isRelated) score += 20;
+			if (isClustered) score += 8;
 			if (f.isPartitioningColumn) score += 6;
 			if (!f.isNested) score += 2;
 			const nullRate = stats[f.path]?.nullRate;

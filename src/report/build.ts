@@ -1,25 +1,31 @@
 /**
  * Stage 4: build the HTML report.
  *
- * Placeholder implementation; the real UI lands next.
+ * Local and free. Reads whatever the earlier stages left on disk, so the
+ * report can be rebuilt instantly while iterating on its design.
  */
 
 import { join } from 'node:path';
-import { layout, writeText } from '../output/writers.ts';
-import { loadJoins, loadProfiles, loadTables } from '../pipeline.ts';
+import { layout, readJson, writeText } from '../output/writers.ts';
+import { loadProfiles, loadTables } from '../pipeline.ts';
+import type { AnalysisResult } from '../types.ts';
+import { buildPayload } from './payload.ts';
+import { renderHtml } from './template.ts';
 
 export async function buildReport(outDir: string): Promise<string> {
 	const dirs = layout(outDir);
-	const [tables, profiles, joins] = await Promise.all([
+	const [tables, profiles, analysis] = await Promise.all([
 		loadTables(outDir),
 		loadProfiles(outDir),
-		loadJoins(outDir),
+		readJson<AnalysisResult>(join(dirs.analysis, 'analysis.json')),
 	]);
+
+	if (!analysis) {
+		throw new Error(`No analysis in ${outDir}. Run "ak-audit analyze" first.`);
+	}
+
+	const html = renderHtml(buildPayload(analysis, tables, profiles));
 	const path = join(dirs.report, 'index.html');
-	await writeText(
-		path,
-		`<!doctype html><meta charset="utf-8"><title>ak-audit</title>
-<pre>${tables.length} tables, ${profiles.length} profiles, ${joins.length} joins</pre>`,
-	);
+	await writeText(path, html);
 	return path;
 }
