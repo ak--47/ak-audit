@@ -34,7 +34,7 @@ import {
 	writeAnalysis,
 	writeManifest,
 } from './pipeline.ts';
-import type { RunManifest } from './types.ts';
+import type { RunManifest, TableMeta } from './types.ts';
 import { color, log, setQuiet } from './util/log.ts';
 import { layout } from './output/writers.ts';
 import { join } from 'node:path';
@@ -169,10 +169,7 @@ common(program.command('profile'))
 	.description('Measure column statistics. This is the stage that costs money.')
 	.action(async (target: string, options: CommonOptions) => {
 		const session = await openSession(target, options);
-		const tables = await loadTables(options.out);
-		if (tables.length === 0) {
-			throw new Error(`No extracted tables in ${options.out}. Run "ak-audit extract" first.`);
-		}
+		const tables = await loadSelected(options);
 		await timed('profile', () => profileStage(session, tables, options));
 	});
 
@@ -181,10 +178,7 @@ common(program.command('usage'))
 	.description('Read query history: who queries what, and which tables go unread.')
 	.action(async (target: string, options: CommonOptions) => {
 		const session = await openSession(target, options);
-		const tables = await loadTables(options.out);
-		if (tables.length === 0) {
-			throw new Error(`No extracted tables in ${options.out}. Run "ak-audit extract" first.`);
-		}
+		const tables = await loadSelected(options);
 		await timed('usage', () => usageStage(session, tables, options));
 	});
 
@@ -358,6 +352,32 @@ async function usageStage(
 	});
 }
 
+/**
+ * Loads the extracted tables a stage should act on.
+ *
+ * `--tables` narrows extraction, but a later stage run against an output
+ * directory that already holds a wider extract would silently ignore it and
+ * work on everything. The filter has to be applied on the way in, not just on
+ * the way out.
+ */
+async function loadSelected(options: CommonOptions): Promise<TableMeta[]> {
+	const all = await loadTables(options.out);
+	if (all.length === 0) {
+		throw new Error(`No extracted tables in ${options.out}. Run "ak-audit extract" first.`);
+	}
+	const filter = buildTableFilter(options.tables);
+	if (!filter) return all;
+
+	const kept = all.filter((t) => filter(t.table));
+	if (kept.length === 0) {
+		throw new Error(`No extracted tables in ${options.out} match --tables ${options.tables}.`);
+	}
+	if (kept.length < all.length) {
+		log.info(`${kept.length} of ${all.length} extracted tables selected by filter`);
+	}
+	return kept;
+}
+
 async function analyzeStage(
 	options: CommonOptions,
 	preloaded?: {
@@ -366,12 +386,14 @@ async function analyzeStage(
 		joins: Awaited<ReturnType<typeof loadJoins>>;
 	},
 ) {
-	const tables = preloaded?.tables ?? (await loadTables(options.out));
-	if (tables.length === 0) {
-		throw new Error(`No extracted tables in ${options.out}. Run "ak-audit extract" first.`);
-	}
-	const profiles = preloaded?.profiles ?? (await loadProfiles(options.out));
-	const joins = preloaded?.joins ?? (await loadJoins(options.out));
+	const tables = preloaded?.tables ?? (await loadSelected(options));
+	const selected = new Set(tables.map((t) => t.fullName));
+	const allProfiles = preloaded?.profiles ?? (await loadProfiles(options.out));
+	const allJoins = preloaded?.joins ?? (await loadJoins(options.out));
+	// Stats and edges for tables outside the filter would put rows in the
+	// catalog for tables the reader never asked to see.
+	const profiles = allProfiles.filter((p) => selected.has(p.table));
+	const joins = allJoins.filter((j) => selected.has(j.from.table) && selected.has(j.to.table));
 
 	log.step('Analyzing');
 	const dataset = `${tables[0]!.project}.${tables[0]!.dataset}`;

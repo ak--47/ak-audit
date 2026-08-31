@@ -67,6 +67,63 @@ export function renderCatalog(
 	return lines.join('\n');
 }
 
+/**
+ * Explains the folder to whoever opens it next.
+ *
+ * The output is meant to be read by an agent that has never seen this tool,
+ * arriving at a directory of JSON with no context. Without a map it reads
+ * every file to find out which one it wanted. This says where to look, and --
+ * just as important -- which parts are absent rather than empty, so a missing
+ * profile is never mistaken for a table with no data.
+ */
+function folderGuide(usage: UsageResult | null | undefined, profiled: boolean): string[] {
+	const lines = [
+		'## How to read this folder',
+		'',
+		'| Path | What is in it |',
+		'| --- | --- |',
+		'| `catalog.md` | Every table and column in one file. Search here first. |',
+		'| `analysis/tables/*.md` | One page per table: columns, stats, relationships, a starter query. |',
+		...(profiled
+			? ['| `analysis/relationships.json` | Value-overlap edges between columns, with the evidence for each. |']
+			: []),
+		...(profiled ? ['| `analysis/joins.json` | The same edges as ready-to-run JOIN clauses. |'] : []),
+		'| `raw/*.json` | Untouched metadata: schema, partitions, lineage, sample rows. |',
+		...(profiled
+			? ['| `profile/*.json` | Per-column statistics: nulls, distinct counts, ranges, top values. |']
+			: []),
+		...(usage ? ['| `usage.json` | Who queried each table, how often, and with what SQL. |'] : []),
+		'| `ddl.sql` | Every table and view definition, concatenated. |',
+		'| `manifest.json` | What ran, what it cost, and what was skipped and why. |',
+		'| `report/index.html` | The same data as a browsable page. |',
+		'',
+		'Read `catalog.md` and this file before querying anything. Everything here',
+		'is already on disk, so answering from it costs nothing.',
+		'',
+	];
+
+	const caveats = [
+		'Distinct counts, overlaps and containment are HyperLogLog estimates, not exact counts. Treat them as strong evidence, not as constraints.',
+		'Row counts carry their source. A count from table metadata is exact; one from a partition sum can lag; `unavailable` means it could not be read at all.',
+	];
+	if (!profiled) {
+		caveats.push(
+			'This run did not profile any columns, so there are no statistics and no value-based relationships. That is an absence of measurement, not a finding about the data.',
+		);
+	}
+	if (!usage) {
+		caveats.push(
+			'Query history was not collected, so nothing here says whether a table is actually read. Re-run with `--usage` to find out.',
+		);
+	} else if (usage.scope === 'user') {
+		caveats.push(
+			'Query history covers only the calling account, not the whole project. A table shown as unread may simply be read by someone else.',
+		);
+	}
+	lines.push('### Before you trust a number', '', ...caveats.map((c) => `- ${c}`), '');
+	return lines;
+}
+
 /** Dataset-level narrative: shape, relationships, and what to be careful about. */
 export function renderOverview(
 	analysis: AnalysisResult,
@@ -89,6 +146,7 @@ export function renderOverview(
 		'',
 		`Generated ${analysis.generatedAt} by ak-audit.`,
 		'',
+		...folderGuide(usage, profiles.length > 0),
 		'## Shape',
 		'',
 		`- ${analysis.tables.length} objects (${analysis.tables.length - views.length} tables, ${views.length} views)`,
