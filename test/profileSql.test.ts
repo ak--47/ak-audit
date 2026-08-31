@@ -199,3 +199,28 @@ describe('buildProfileChunks', () => {
 		expect(chunk!.sql).not.toContain('`items`.`sku`');
 	});
 });
+
+describe('table alias', () => {
+	it('qualifies columns so one named after its table cannot mean the row', () => {
+		// Measured: a table holding a `vitally_health_score` column rejected
+		// MIN(`vitally_health_score`) as MIN over a STRUCT, because the bare
+		// name resolved to the table rather than the column.
+		const [chunk] = buildProfileChunks({
+			fullName: 'p.d.vitally_health_score',
+			fields: [field({ path: 'vitally_health_score', baseType: 'FLOAT64' })],
+			sketchPaths: new Set(),
+		});
+		expect(chunk!.sql).toContain('AS _akt');
+		expect(chunk!.sql).toContain('_akt.`vitally_health_score`');
+		expect(chunk!.sql).not.toMatch(/MIN\(`vitally_health_score`\)/);
+	});
+
+	it('qualifies nested paths too', () => {
+		const [chunk] = buildProfileChunks({
+			fullName: 'p.d.t',
+			fields: [field({ path: 'campaigns.utm_source', isNested: true })],
+			sketchPaths: new Set(),
+		});
+		expect(chunk!.sql).toContain('_akt.`campaigns`.`utm_source`');
+	});
+});

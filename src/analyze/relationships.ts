@@ -261,18 +261,65 @@ export function rankEdges(edges: JoinEdge[]): JoinEdge[] {
 }
 
 /**
+ * Decides whether a pair could possibly produce an edge.
+ *
+ * Pair count grows with the square of the sketched columns, so a dataset of
+ * 600 tables reaches hundreds of millions of pairs — far past what can be
+ * merged, or even held in memory. Almost all of them are pairs `buildEdge`
+ * would reject anyway.
+ *
+ * Every test below mirrors a rejection rule that needs no union value, so
+ * pruning here removes only pairs that were certain to be discarded. It is
+ * a speed change, not a behaviour change.
+ */
+export function couldProduceEdge(a: SketchedColumn, b: SketchedColumn): boolean {
+	if (a.table === b.table && a.column === b.column) return false;
+
+	const smallerNdv = Math.min(a.ndv, b.ndv);
+	const largerNdv = Math.max(a.ndv, b.ndv);
+
+	// No threshold in buildEdge is ever below the duplicate floor.
+	if (smallerNdv < MIN_DUPLICATE_NDV) return false;
+
+	if (namesCompatible(a, b)) return true;
+
+	// Without agreeing names the pair must clear both the key floor and the
+	// Jaccard floor. The best case for Jaccard is every value of the smaller
+	// side matching, so min/max is an upper bound on what it could reach.
+	if (smallerNdv < MIN_KEY_NDV) return false;
+	if (largerNdv > 0 && smallerNdv / largerNdv < MIN_UNNAMED_JACCARD) return false;
+
+	// Dense integer runs overlap by arithmetic, so they need agreeing names.
+	const smaller = a.ndv <= b.ndv ? a : b;
+	const larger = a.ndv <= b.ndv ? b : a;
+	if (smaller.dense) return false;
+	if (larger.dense && smaller.integral) return false;
+
+	return true;
+}
+
+/**
  * Every unordered pair worth merging.
  *
- * Pairs of columns whose leaf names differ AND whose cardinalities are wildly
- * apart are still included: cross-named keys are common and the merge is
- * cheap. The bound on cost comes from limiting sketches per table, not here.
+ * Pairs are filtered while they are enumerated rather than afterwards: the
+ * unfiltered list for a large dataset does not fit in memory.
  */
-export function pairsToMerge(columns: SketchedColumn[]): [SketchedColumn, SketchedColumn][] {
+export function pairsToMerge(
+	columns: SketchedColumn[],
+	maxPairs = Number.POSITIVE_INFINITY,
+): { pairs: [SketchedColumn, SketchedColumn][]; considered: number; truncated: boolean } {
 	const pairs: [SketchedColumn, SketchedColumn][] = [];
+	let considered = 0;
+
 	for (let i = 0; i < columns.length; i++) {
 		for (let j = i + 1; j < columns.length; j++) {
-			pairs.push([columns[i]!, columns[j]!]);
+			considered++;
+			const a = columns[i]!;
+			const b = columns[j]!;
+			if (!couldProduceEdge(a, b)) continue;
+			if (pairs.length >= maxPairs) return { pairs, considered, truncated: true };
+			pairs.push([a, b]);
 		}
 	}
-	return pairs;
+	return { pairs, considered, truncated: false };
 }

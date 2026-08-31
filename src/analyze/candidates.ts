@@ -18,6 +18,16 @@ import { GENERIC_NAMES, isIdentifierName, KEY_TYPES, NUMERIC_KEY_TYPES } from '.
 /** Upper bound on sketched columns per table. */
 export const MAX_SKETCHES_PER_TABLE = 40;
 
+/**
+ * Upper bound on sketched columns across a whole dataset.
+ *
+ * Comparison cost grows with the square of this number. At 600 tables the
+ * per-table cap alone would allow 24,000 columns, which is roughly 300
+ * million pairs -- more than can be enumerated, let alone merged. Columns
+ * are kept in score order, so the ones most likely to be keys survive.
+ */
+export const MAX_SKETCHES_PER_DATASET = 5000;
+
 export interface CandidateSelection {
 	/** Field paths to sketch, per table full name. */
 	byTable: Map<string, Set<string>>;
@@ -57,6 +67,7 @@ export function selectJoinCandidates(tables: TableMeta[]): CandidateSelection {
 
 	const byTable = new Map<string, Set<string>>();
 	const reasons = new Map<string, string>();
+	const everything: { table: string; path: string; score: number; reason: string }[] = [];
 
 	for (const table of tables) {
 		const scored: { path: string; score: number; reason: string }[] = [];
@@ -105,10 +116,18 @@ export function selectJoinCandidates(tables: TableMeta[]): CandidateSelection {
 		}
 
 		scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
-		const chosen = scored.slice(0, MAX_SKETCHES_PER_TABLE);
+		for (const c of scored.slice(0, MAX_SKETCHES_PER_TABLE)) {
+			everything.push({ table: table.fullName, ...c });
+		}
+		byTable.set(table.fullName, new Set());
+	}
 
-		byTable.set(table.fullName, new Set(chosen.map((c) => c.path)));
-		for (const c of chosen) reasons.set(`${table.fullName}.${c.path}`, c.reason);
+	// Apply the dataset-wide cap in score order, so a few enormous tables
+	// cannot crowd out the obvious keys in every other table.
+	everything.sort((a, b) => b.score - a.score || a.table.localeCompare(b.table));
+	for (const c of everything.slice(0, MAX_SKETCHES_PER_DATASET)) {
+		byTable.get(c.table)?.add(c.path);
+		reasons.set(`${c.table}.${c.path}`, c.reason);
 	}
 
 	return { byTable, reasons };

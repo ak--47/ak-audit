@@ -66,6 +66,9 @@ export async function runProfile(options: ProfileOptions): Promise<ProfileResult
 			lookback: options.partitionLookback,
 			full: options.fullScan,
 			requirePartitionFilter: table.requirePartitionFilter,
+			partitionColumnType:
+				table.schema.find((f) => f.path === table.partitioning?.field)?.baseType ??
+				'TIMESTAMP',
 		});
 
 		const profile = await profileTable({

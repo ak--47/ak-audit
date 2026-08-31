@@ -18,6 +18,7 @@ import {
 	columnKey,
 	isDenseSequence,
 	isIntegerRange,
+	pairsToMerge,
 	rankEdges,
 	type SketchedColumn,
 } from '../../analyze/relationships.ts';
@@ -32,6 +33,15 @@ import { log } from '../../util/log.ts';
  * the same batch.
  */
 export const MAX_MERGE_SQL_CHARS = 700_000;
+
+/**
+ * Ceiling on pairs merged in one run.
+ *
+ * A backstop, not the primary control: `couldProduceEdge` already discards
+ * the pairs that could not yield an edge. This only stops a pathological
+ * dataset from running all night.
+ */
+export const MAX_PAIRS = 200_000;
 
 /** Collects every sketched column across all profiled tables. */
 export function collectSketches(profiles: TableProfile[]): SketchedColumn[] {
@@ -174,6 +184,8 @@ export interface DetectJoinsOptions {
 	lineagePairs?: Set<string>;
 	/** Skip the merge entirely, e.g. during a cost estimate. */
 	skip?: boolean;
+	/** Hard ceiling on pairs to merge. */
+	maxPairs?: number;
 }
 
 /** Unordered key for a pair of tables. */
@@ -194,26 +206,26 @@ export async function detectJoins(options: DetectJoinsOptions): Promise<JoinEdge
 
 	if (options.skip || columns.length < 2) return [];
 
-	const pairs: [SketchedColumn, SketchedColumn][] = [];
-	for (let i = 0; i < columns.length; i++) {
-		for (let j = i + 1; j < columns.length; j++) {
-			const a = columns[i]!;
-			const b = columns[j]!;
-			// Two different columns of the same table are worth comparing;
-			// a column against itself is not.
-			if (a.table === b.table && a.column === b.column) continue;
-			// A view mirrors its source, so those matches are guaranteed and
-			// uninformative.
-			if (options.lineagePairs?.has(tablePairKey(a.table, b.table))) continue;
-			pairs.push([a, b]);
-		}
-	}
-
 	log.step('Detecting joins');
+
+	const { pairs, considered, truncated } = pairsToMerge(columns, options.maxPairs ?? MAX_PAIRS);
+
+	// A view mirrors its source, so those matches are guaranteed and
+	// uninformative; lineage already states the connection exactly.
+	const filtered = options.lineagePairs
+		? pairs.filter(([a, b]) => !options.lineagePairs!.has(tablePairKey(a.table, b.table)))
+		: pairs;
+
 	log.info(
-		`${columns.length} key columns, ${pairs.length.toLocaleString()} pairs ` +
-			`(0 bytes of table data scanned)`,
+		`${columns.length} key columns, ${considered.toLocaleString()} possible pairs, ` +
+			`${filtered.length.toLocaleString()} worth merging (0 bytes of table data scanned)`,
 	);
+	if (truncated) {
+		log.warn(
+			`pair list capped at ${(options.maxPairs ?? MAX_PAIRS).toLocaleString()}; ` +
+				'some relationships may be missed',
+		);
+	}
 
 	const byKey = new Map(columns.map((c) => [columnKey(c.table, c.column), c]));
 	const edges: JoinEdge[] = [];
@@ -239,7 +251,7 @@ export async function detectJoins(options: DetectJoinsOptions): Promise<JoinEdge
 		}
 	}
 
-	for (const batch of batchPairs(pairs)) {
+	for (const batch of batchPairs(filtered)) {
 		try {
 			const rows = await runBatch(batch);
 			for (const row of rows) {

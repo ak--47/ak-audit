@@ -34,6 +34,15 @@ export const TOP_N = 10;
  */
 export const HLL_PRECISION = 12;
 
+/**
+ * Alias every profiled table is given.
+ *
+ * Column references are qualified with it so that a column sharing its
+ * table's name cannot resolve to the row struct instead. Underscore-prefixed
+ * so it cannot collide with a real table name.
+ */
+export const TABLE_ALIAS = '_akt';
+
 export type StatKind =
 	| 'nullCount'
 	| 'ndv'
@@ -138,9 +147,18 @@ export function isReachable(field: SchemaField, byPath: Map<string, SchemaField>
  *
  * @param index Position used to build a collision-proof alias prefix.
  * @param sketch Whether to emit an HLL sketch for join detection.
+ * @param alias Table alias to qualify the column with. Without one, a
+ *   column sharing its table's name resolves to the whole row: measured on
+ *   a table holding a `vitally_health_score` column, where bare
+ *   `MIN(vitally_health_score)` was rejected as MIN over a STRUCT.
  */
-export function planColumnStats(field: SchemaField, index: number, sketch: boolean): ColumnPlan {
-	const col = quotePath(field.path);
+export function planColumnStats(
+	field: SchemaField,
+	index: number,
+	sketch: boolean,
+	alias = '',
+): ColumnPlan {
+	const col = alias ? `${alias}.${quotePath(field.path)}` : quotePath(field.path);
 	const p = `c${index}`;
 	const type = normalizeType(field.baseType || field.dataType);
 	const stats: StatExpr[] = [
@@ -296,7 +314,7 @@ export function buildProfileChunks(options: BuildProfileOptions): ProfileChunk[]
 		return true;
 	});
 
-	const from = quoteTable(fullName);
+	const from = `${quoteTable(fullName)} AS ${TABLE_ALIAS}`;
 	const sample =
 		tablesamplePercent && tablesamplePercent > 0
 			? ` TABLESAMPLE SYSTEM (${tablesamplePercent} PERCENT)`
@@ -308,7 +326,8 @@ export function buildProfileChunks(options: BuildProfileOptions): ProfileChunk[]
 		const selects = ['COUNT(*) AS row_count'];
 
 		chunk.forEach((field, i) => {
-			for (const stat of planColumnStats(field, i, sketchPaths.has(field.path)).stats) {
+			for (const stat of planColumnStats(field, i, sketchPaths.has(field.path), TABLE_ALIAS)
+				.stats) {
 				selects.push(`${stat.expr} AS ${stat.alias}`);
 				aliasMap[stat.alias] = { path: field.path, kind: stat.kind };
 			}

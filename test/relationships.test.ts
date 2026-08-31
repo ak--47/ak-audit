@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildEdge,
+	couldProduceEdge,
 	isDenseSequence,
 	namesCompatible,
 	pairsToMerge,
@@ -223,7 +224,61 @@ describe('rankEdges', () => {
 
 describe('pairsToMerge', () => {
 	it('produces every unordered pair exactly once', () => {
-		const cols = [col('t', 'a', 5), col('t', 'b', 5), col('u', 'c', 5)];
-		expect(pairsToMerge(cols)).toHaveLength(3);
+		const cols = [col('t', 'user_id', 500), col('t', 'user_id2', 500), col('u', 'user_id', 500)];
+		expect(pairsToMerge(cols).pairs).toHaveLength(3);
+	});
+});
+
+describe('couldProduceEdge pruning', () => {
+	it('keeps name-compatible pairs whatever their sizes', () => {
+		expect(
+			couldProduceEdge(col('a.orders', 'room_id', 30), col('b.rooms', 'room_id', 900000)),
+		).toBe(true);
+	});
+
+	it('drops pairs too lopsided to ever clear the Jaccard floor', () => {
+		// 131 values inside 58,257 caps Jaccard at 0.002, far under the floor,
+		// so merging the pair could only ever confirm a rejection.
+		expect(
+			couldProduceEdge(col('a.events', 'product_id', 131), col('b.ct', 'insert_id', 58257)),
+		).toBe(false);
+	});
+
+	it('drops pairs below the smallest possible cardinality floor', () => {
+		expect(couldProduceEdge(col('a.t', 'x', 4), col('b.u', 'y', 4))).toBe(false);
+	});
+
+	it('drops dense integer runs with unrelated names', () => {
+		expect(
+			couldProduceEdge(
+				col('a.products', 'product_id', 1000, true),
+				col('b.rooms', 'room_id', 1200, true),
+			),
+		).toBe(false);
+	});
+
+	it('keeps plausible unrelated-name pairs of similar size', () => {
+		expect(
+			couldProduceEdge(col('a.t', 'checkout_token', 5000), col('b.u', 'payment_ref', 5200)),
+		).toBe(true);
+	});
+
+	it('cuts the pair space by orders of magnitude on a realistic mix', () => {
+		const cols = [
+			...Array.from({ length: 300 }, (_, i) =>
+				col(`t${i % 40}`, `metric_${i}`, 50 + i, true),
+			),
+			...Array.from({ length: 60 }, (_, i) => col(`t${i % 20}`, 'user_id', 900 + i)),
+		];
+		const { pairs, considered } = pairsToMerge(cols);
+		expect(considered).toBeGreaterThan(60000);
+		expect(pairs.length).toBeLessThan(considered / 10);
+	});
+
+	it('stops at the pair ceiling instead of exhausting memory', () => {
+		const cols = Array.from({ length: 400 }, (_, i) => col(`t${i}`, 'user_id', 1000 + i));
+		const { pairs, truncated } = pairsToMerge(cols, 100);
+		expect(pairs).toHaveLength(100);
+		expect(truncated).toBe(true);
 	});
 });

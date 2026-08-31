@@ -156,3 +156,43 @@ describe('BudgetTracker', () => {
 		expect(t.costSpent).toBeCloseTo(6.25, 2);
 	});
 });
+
+describe('partition literals match the column type', () => {
+	it('uses a DATE literal for a DATE partition column', () => {
+		// A DATE column will not compare against a TIMESTAMP; BigQuery
+		// rejects it with "No matching signature for operator >=".
+		// Measured on mixpanel-sa.sales_intelligence.mart_mrr, partitioned
+		// by MONTH over a DATE column.
+		const plan = planScan({
+			partitioning: { field: 'date_month', granularity: 'MONTH', kind: 'time' },
+			partitions: [{ partitionId: '202406', rows: 10, lastModified: null }],
+			rowCount: 1e9,
+			partitionColumnType: 'DATE',
+			lookback: 1,
+		});
+		expect(plan.whereClause).toContain('DATE "2024-06-01"');
+		expect(plan.whereClause).not.toContain('TIMESTAMP');
+	});
+
+	it('uses a DATETIME literal for a DATETIME partition column', () => {
+		const plan = planScan({
+			partitioning: { field: 'ts', granularity: 'DAY', kind: 'time' },
+			partitions: parts('20240601'),
+			rowCount: 1e9,
+			partitionColumnType: 'DATETIME',
+			lookback: 1,
+		});
+		expect(plan.whereClause).toContain('DATETIME "2024-06-01');
+	});
+
+	it('keeps TIMESTAMP for ingestion-time partitioning whatever the column says', () => {
+		const plan = planScan({
+			partitioning: { field: '_PARTITIONTIME', granularity: 'DAY', kind: 'ingestion-time' },
+			partitions: parts('20240601'),
+			rowCount: 1e9,
+			partitionColumnType: 'DATE',
+			lookback: 1,
+		});
+		expect(plan.whereClause).toContain('TIMESTAMP "2024-06-01');
+	});
+})

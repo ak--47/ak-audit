@@ -59,11 +59,30 @@ function isSpecialPartition(id: string): boolean {
 	return id.startsWith('__');
 }
 
+/**
+ * Renders a boundary as a literal of the partition column's own type.
+ *
+ * A DATE column will not compare against a TIMESTAMP: BigQuery rejects it
+ * with "No matching signature for operator >=". Measured on a table
+ * partitioned by MONTH over a DATE column.
+ */
+function boundaryLiteral(iso: string, columnType: string): string {
+	switch (columnType.toUpperCase()) {
+		case 'DATE':
+			return `DATE "${iso.slice(0, 10)}"`;
+		case 'DATETIME':
+			return `DATETIME "${iso}"`;
+		default:
+			return `TIMESTAMP "${iso}"`;
+	}
+}
+
 function partitionPredicate(
 	field: string,
 	granularity: string,
 	kind: PartitioningConfig['kind'],
 	ids: string[],
+	columnType: string,
 ): string | null {
 	const usable = ids.filter((id) => !isSpecialPartition(id));
 	if (usable.length === 0) return null;
@@ -84,7 +103,8 @@ function partitionPredicate(
 
 	// A half-open range keeps the predicate prunable, which a function call
 	// on the partition column would not be.
-	return `${column} >= TIMESTAMP("${start}") AND ${column} < TIMESTAMP("${end}")`;
+	const type = kind === 'ingestion-time' ? 'TIMESTAMP' : columnType;
+	return `${column} >= ${boundaryLiteral(start, type)} AND ${column} < ${boundaryLiteral(end, type)}`;
 }
 
 function partitionBounds(id: string, granularity: string): { start: string; end: string } | null {
@@ -123,6 +143,8 @@ export interface PlanScanOptions {
 	lookback?: number;
 	/** Profile the whole table regardless of size. */
 	full?: boolean;
+	/** Declared type of the partition column, so literals match it. */
+	partitionColumnType?: string;
 	/**
 	 * The table rejects any query without a partition filter.
 	 *
@@ -164,6 +186,7 @@ export function planScan(options: PlanScanOptions): ScanPlan {
 			partitioning.granularity,
 			partitioning.kind,
 			ids,
+			options.partitionColumnType ?? 'TIMESTAMP',
 		);
 		if (predicate) {
 			const rows = recent.reduce((sum, p) => sum + p.rows, 0);
