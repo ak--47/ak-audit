@@ -11,7 +11,7 @@ import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const ROOT = join(homedir(), 'tmp');
+const ROOT = join(homedir(), 'tmp', 'dwh-investigation');
 const DATASETS = [
 	'dbt_aeng',
 	'sales_intelligence',

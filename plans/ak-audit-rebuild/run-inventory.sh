@@ -17,7 +17,7 @@
 set -uo pipefail
 cd /Users/ak/code/ak-audit
 
-OUT=~/tmp
+OUT=~/tmp/dwh-investigation
 LOG="$OUT/_logs"
 mkdir -p "$LOG"
 
