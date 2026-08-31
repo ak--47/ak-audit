@@ -15,6 +15,15 @@
 /** Types that can meaningfully identify a row. */
 export const KEY_TYPES = new Set(['STRING', 'INT64', 'NUMERIC', 'BIGNUMERIC']);
 
+/**
+ * Key-capable types whose values are bare numbers.
+ *
+ * These need a stricter test than strings do: sketches compare values cast
+ * to STRING, so any two small-integer columns overlap heavily whether or
+ * not they are related.
+ */
+export const NUMERIC_KEY_TYPES = new Set(['INT64', 'NUMERIC', 'BIGNUMERIC']);
+
 /** Types that represent a point in time. */
 export const TEMPORAL_TYPES = new Set(['TIMESTAMP', 'DATETIME', 'DATE', 'TIME']);
 

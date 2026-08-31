@@ -31,11 +31,131 @@ export const DUPLICATE_SIMILARITY = 0.98;
 /** Weakest containment still worth reporting. */
 export const MIN_REPORTED_CONTAINMENT = 0.3;
 
+/**
+ * Cross-table overlap below this many distinct values is coincidence.
+ *
+ * Measured: a 15-value `country_code` column scored containment 1.00
+ * against a 14,341-value `session_id`, purely because fifteen short strings
+ * happen to appear somewhere in a large set.
+ */
+export const MIN_KEY_NDV = 25;
+
+/** Same-table duplicates are strong evidence, so they need less headroom. */
+export const MIN_DUPLICATE_NDV = 10;
+
+/** Fill ratio at which a numeric column counts as a dense sequence. */
+export const DENSE_FILL_RATIO = 0.8;
+
+/**
+ * Similarity required to report a relationship between differently named
+ * columns.
+ *
+ * Containment alone cannot tell a real key from a small set that happens to
+ * sit inside a large one. When the names agree, containment is enough; when
+ * they do not, the sets must also be a meaningful fraction of each other.
+ */
+export const MIN_UNNAMED_JACCARD = 0.05;
+
 export interface SketchedColumn {
 	table: string;
 	column: string;
 	ndv: number;
 	sketch: string;
+	/**
+	 * True when the column's values form a nearly gap-free integer run, as a
+	 * generated surrogate key does.
+	 *
+	 * Sketches are built over values cast to STRING, so any two dense
+	 * integer runs starting near 1 overlap almost completely whether or not
+	 * they are related. Measured: `products.product_id` (1..1000) scored
+	 * containment 1.00 against `rooms.room_id` (1..9992), as did
+	 * `ad_spend.impressions`. Without this flag the graph fills with
+	 * confident nonsense.
+	 */
+	dense: boolean;
+	/**
+	 * True when the column's values are integers.
+	 *
+	 * Density alone is not enough to catch the problem. A child column
+	 * holding a subset of a generated key is itself sparse -- measured,
+	 * `complexTypes.room_id` fills only 74% of its range -- yet it still
+	 * sits entirely inside any dense run of the same magnitude. What matters
+	 * is that small integers land inside a dense integer sequence whatever
+	 * their own spacing.
+	 */
+	integral: boolean;
+}
+
+/**
+ * Decides whether two column names refer to the same thing.
+ *
+ * Used only to break ties for dense numeric columns, where values alone
+ * cannot distinguish a real key from an arithmetic coincidence.
+ */
+export function namesCompatible(a: SketchedColumn, b: SketchedColumn): boolean {
+	const an = leaf(a.column);
+	const bn = leaf(b.column);
+	if (an === bn) return true;
+
+	// `orders.id` referenced as `items.order_id`.
+	const aEntity = entityOf(a.table);
+	const bEntity = entityOf(b.table);
+	if (isBareId(an) && bn === `${aEntity}_id`) return true;
+	if (isBareId(bn) && an === `${bEntity}_id`) return true;
+
+	// `user_id` against `user_uuid`, or `account_id` against `id_account`.
+	const aStem = stem(an);
+	const bStem = stem(bn);
+	return aStem.length > 2 && aStem === bStem;
+}
+
+function leaf(path: string): string {
+	return (path.split('.').at(-1) ?? path).toLowerCase();
+}
+
+function isBareId(name: string): boolean {
+	return name === 'id' || name === '_id' || name === 'pk';
+}
+
+/** Strips a trailing key suffix so `user_id` and `user_uuid` compare equal. */
+function stem(name: string): string {
+	return name.replace(/_(id|key|uuid|guid|code|ref|num|number|pk|fk)$/, '');
+}
+
+/** Best-effort singular entity name for a table, e.g. `rooms` -> `room`. */
+function entityOf(fullName: string): string {
+	const table = (fullName.split('.').at(-1) ?? fullName).toLowerCase();
+	return table.endsWith('ies')
+		? `${table.slice(0, -3)}y`
+		: table.endsWith('s') && !table.endsWith('ss')
+			? table.slice(0, -1)
+			: table;
+}
+
+/** True when a column's observed values are integers. */
+export function isIntegerRange(min: string | null, max: string | null): boolean {
+	if (min === null || max === null) return false;
+	return /^-?\d+$/.test(String(min).trim()) && /^-?\d+$/.test(String(max).trim());
+}
+
+/**
+ * Detects a nearly gap-free integer run from statistics already collected.
+ *
+ * Needs no extra query: min, max and distinct count come from the profile
+ * scan.
+ */
+export function isDenseSequence(
+	min: string | null,
+	max: string | null,
+	ndv: number | null,
+): boolean {
+	if (!isIntegerRange(min, max) || ndv === null) return false;
+	const lo = Number(min);
+	const hi = Number(max);
+	if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi < lo) return false;
+	const span = hi - lo + 1;
+	if (span <= 0 || span > Number.MAX_SAFE_INTEGER) return false;
+	return ndv / span >= DENSE_FILL_RATIO;
 }
 
 export interface MergedPair {
@@ -71,8 +191,40 @@ export function buildEdge(
 	const jaccard = unionNdv > 0 ? Math.min(1, intersection / unionNdv) : 0;
 	if (containment < MIN_REPORTED_CONTAINMENT) return null;
 
+	const sameTable = a.table === b.table;
+	const looksDuplicate = containment >= DUPLICATE_SIMILARITY && jaccard >= DUPLICATE_SIMILARITY;
+
+	// Too few distinct values for overlap to mean anything.
+	if (smaller < (looksDuplicate ? MIN_DUPLICATE_NDV : MIN_KEY_NDV)) return null;
+
+	const compatible = namesCompatible(a, b);
+
+	if (!looksDuplicate && !compatible) {
+		const smallerSide = a.ndv <= b.ndv ? a : b;
+		const largerSide = a.ndv <= b.ndv ? b : a;
+
+		// A dense integer run is swallowed by almost any larger set, so full
+		// containment of one proves nothing on its own. Measured:
+		// events.product_id (131 dense values) scored containment 1.00
+		// against complexTypes.insert_id (58,257 values).
+		if (smallerSide.dense) return null;
+
+		// The mirror case: any set of small integers lies inside a dense
+		// integer run of the same magnitude. Measured:
+		// complexTypes.room_id scored containment 1.00 against
+		// videos.video_id (1..50000) purely because both count from one.
+		if (largerSide.dense && smallerSide.integral) return null;
+
+		// Containment alone cannot separate a genuine key from a small set
+		// that happens to sit inside a large one. Without agreeing names,
+		// require the two sets to be a meaningful fraction of each other.
+		// Measured: events.video_id -> complexTypes.session_id reached
+		// containment 1.00 at a Jaccard of 0.015.
+		if (jaccard < MIN_UNNAMED_JACCARD) return null;
+	}
+
 	let kind: EdgeKind = 'overlap';
-	if (containment >= DUPLICATE_SIMILARITY && jaccard >= DUPLICATE_SIMILARITY) {
+	if (looksDuplicate) {
 		kind = 'duplicate';
 	} else if (containment >= FOREIGN_KEY_CONTAINMENT) {
 		kind = 'foreign-key';
@@ -88,7 +240,7 @@ export function buildEdge(
 		containment: round(containment),
 		jaccard: round(jaccard),
 		kind,
-		sameTable: a.table === b.table,
+		sameTable,
 		reason,
 	};
 }

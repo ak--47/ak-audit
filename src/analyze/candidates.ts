@@ -13,7 +13,7 @@
 
 import type { SchemaField, TableMeta } from '../types.ts';
 import { normalizeType } from '../warehouse/bigquery/profileSql.ts';
-import { GENERIC_NAMES, isIdentifierName, KEY_TYPES } from './patterns.ts';
+import { GENERIC_NAMES, isIdentifierName, KEY_TYPES, NUMERIC_KEY_TYPES } from './patterns.ts';
 
 /** Upper bound on sketched columns per table. */
 export const MAX_SKETCHES_PER_TABLE = 40;
@@ -67,11 +67,21 @@ export function selectJoinCandidates(tables: TableMeta[]): CandidateSelection {
 			const shared = tablesPerName.get(leaf)?.size ?? 0;
 			const looksLikeId = isIdentifierName(field.path);
 			const isGeneric = GENERIC_NAMES.has(leaf);
+			const isNumeric = NUMERIC_KEY_TYPES.has(
+				normalizeType(field.baseType || field.dataType),
+			);
 
 			// A shared generic name like `name` or `status` matches across
 			// unrelated tables by coincidence. Skip unless it also reads as
 			// an identifier.
 			if (isGeneric && !looksLikeId) continue;
+
+			// Numeric columns must be named like identifiers. Sharing a name
+			// is not enough: measured columns such as `impressions` and
+			// `screen_width` hold small integers that overlap every other
+			// small-integer column, producing confident false relationships.
+			if (isNumeric && !looksLikeId) continue;
+
 			if (!looksLikeId && shared < 2) continue;
 
 			const reasonParts: string[] = [];
