@@ -42,7 +42,7 @@ export const MAX_MERGE_SQL_CHARS = 700_000;
  * the pairs that could not yield an edge. This only stops a pathological
  * dataset from running all night.
  */
-export const MAX_PAIRS = 200_000;
+export const MAX_PAIRS = 60_000;
 
 /** Merge batches run in parallel; they are independent and read no tables. */
 export const MERGE_CONCURRENCY = 6;
@@ -212,7 +212,10 @@ export async function detectJoins(options: DetectJoinsOptions): Promise<JoinEdge
 
 	log.step('Detecting joins');
 
-	const { pairs, considered, truncated } = pairsToMerge(columns, options.maxPairs ?? MAX_PAIRS);
+	const { pairs, considered, truncated, named } = pairsToMerge(
+		columns,
+		options.maxPairs ?? MAX_PAIRS,
+	);
 
 	// A view mirrors its source, so those matches are guaranteed and
 	// uninformative; lineage already states the connection exactly.
@@ -222,12 +225,13 @@ export async function detectJoins(options: DetectJoinsOptions): Promise<JoinEdge
 
 	log.info(
 		`${columns.length} key columns, ${considered.toLocaleString()} possible pairs, ` +
-			`${filtered.length.toLocaleString()} worth merging (0 bytes of table data scanned)`,
+			`${filtered.length.toLocaleString()} worth merging ` +
+			`(${named.toLocaleString()} name-matched; 0 bytes of table data scanned)`,
 	);
 	if (truncated) {
 		log.warn(
 			`pair list capped at ${(options.maxPairs ?? MAX_PAIRS).toLocaleString()}; ` +
-				'some relationships may be missed',
+				'every name-matched pair was kept, weaker candidates were dropped',
 		);
 	}
 

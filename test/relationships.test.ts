@@ -281,4 +281,19 @@ describe('couldProduceEdge pruning', () => {
 		expect(pairs).toHaveLength(100);
 		expect(truncated).toBe(true);
 	});
+
+	it('keeps every name-matched pair when the cap bites', () => {
+		// Truncating in enumeration order would keep whatever sorted first
+		// and discard the rest of the dataset, including obvious keys.
+		const cols = [
+			...Array.from({ length: 40 }, (_, i) => col(`t${i}`, 'account_id', 5000 + i)),
+			...Array.from({ length: 200 }, (_, i) => col(`u${i}`, `token_${i}`, 5000 + i)),
+		];
+		const { pairs, named, truncated } = pairsToMerge(cols, 900);
+		expect(truncated).toBe(true);
+		// 40 account_id columns -> 780 mutually name-matched pairs, all kept.
+		expect(named).toBe(780);
+		const keptNamed = pairs.filter(([a, b]) => a.column === 'account_id' && b.column === 'account_id');
+		expect(keptNamed).toHaveLength(780);
+	});
 });

@@ -299,17 +299,30 @@ export function couldProduceEdge(a: SketchedColumn, b: SketchedColumn): boolean 
 }
 
 /**
- * Every unordered pair worth merging.
+ * Every unordered pair worth merging, best candidates first.
  *
  * Pairs are filtered while they are enumerated rather than afterwards: the
  * unfiltered list for a large dataset does not fit in memory.
+ *
+ * Order matters as much as the filter. When a cap has to bite, truncating
+ * the list in enumeration order would keep whatever happened to come first
+ * alphabetically and discard the rest of the dataset entirely. Pairs whose
+ * names agree are far likelier to be real keys, so they are collected
+ * separately and always survive the cap.
  */
 export function pairsToMerge(
 	columns: SketchedColumn[],
 	maxPairs = Number.POSITIVE_INFINITY,
-): { pairs: [SketchedColumn, SketchedColumn][]; considered: number; truncated: boolean } {
-	const pairs: [SketchedColumn, SketchedColumn][] = [];
+): {
+	pairs: [SketchedColumn, SketchedColumn][];
+	considered: number;
+	truncated: boolean;
+	named: number;
+} {
+	const named: [SketchedColumn, SketchedColumn][] = [];
+	const unnamed: [SketchedColumn, SketchedColumn][] = [];
 	let considered = 0;
+	let dropped = false;
 
 	for (let i = 0; i < columns.length; i++) {
 		for (let j = i + 1; j < columns.length; j++) {
@@ -317,9 +330,24 @@ export function pairsToMerge(
 			const a = columns[i]!;
 			const b = columns[j]!;
 			if (!couldProduceEdge(a, b)) continue;
-			if (pairs.length >= maxPairs) return { pairs, considered, truncated: true };
-			pairs.push([a, b]);
+
+			if (namesCompatible(a, b)) {
+				if (named.length < maxPairs) named.push([a, b]);
+				else dropped = true;
+			} else if (unnamed.length < maxPairs) {
+				unnamed.push([a, b]);
+			} else {
+				dropped = true;
+			}
 		}
 	}
-	return { pairs, considered, truncated: false };
+
+	const room = Math.max(0, maxPairs - named.length);
+	const pairs = [...named, ...unnamed.slice(0, room)];
+	return {
+		pairs,
+		considered,
+		truncated: dropped || unnamed.length > room,
+		named: named.length,
+	};
 }
