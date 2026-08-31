@@ -110,7 +110,11 @@ example queries.
 It also lists the tables nobody read at all in the window, which is usually the
 most actionable thing in the report.
 
-Two honesty notes, both surfaced in the output rather than buried:
+It excludes its own jobs. Auditing a dataset means querying most of it, so
+without that the tool reads its own profiling traffic back and reports it as
+usage. Excluded jobs are counted, not hidden.
+
+Three honesty notes, all surfaced in the output rather than buried:
 
 - **Project-wide history needs `bigquery.jobs.listAll`.** Without it, ak-audit
   falls back to your own queries only and says so, because "nobody queries this"
@@ -119,6 +123,9 @@ Two honesty notes, both surfaced in the output rather than buried:
   resolves to its underlying tables. Views are matched by name in the query text
   instead, which is approximate and labelled as such. Without this every view
   looks dead.
+- **A name can be queried and be gone.** Tables read during the window that are
+  no longer in the dataset are listed separately rather than counted as dataset
+  tables, because that gap is usually the interesting part.
 
 Query history is not free metadata: roughly $0.013 per day of window. It obeys
 `--max-cost` like anything else.
