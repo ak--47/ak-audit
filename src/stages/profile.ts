@@ -65,6 +65,7 @@ export async function runProfile(options: ProfileOptions): Promise<ProfileResult
 			rowCount: table.rowCount,
 			lookback: options.partitionLookback,
 			full: options.fullScan,
+			requirePartitionFilter: table.requirePartitionFilter,
 		});
 
 		const profile = await profileTable({
@@ -111,6 +112,12 @@ async function profileTable(args: ProfileTableArgs): Promise<TableProfile> {
 
 	if (table.schema.length === 0) {
 		return { ...empty, skipped: 'no readable schema' };
+	}
+
+	// BigQuery would refuse every query we could build for this table.
+	if (plan.unfilterable) {
+		log.warn(`${table.table} skipped — ${plan.detail}`);
+		return { ...empty, skipped: plan.detail };
 	}
 
 	const chunks = buildProfileChunks({

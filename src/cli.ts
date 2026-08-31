@@ -60,6 +60,8 @@ function common(cmd: Command): Command {
 		.option('--max-bytes-per-table <size>', 'skip a table above this scan size', '50GB')
 		.option('--max-bytes-total <size>', 'stop profiling above this total', '500GB')
 		.option('--full', 'scan whole tables instead of pruning or sampling')
+		.option('--no-exact-rows', 'skip the COUNT(*) fallback used for views')
+		.option('--count-budget <size>', 'ceiling on one exact row count', '20GB')
 		.option('-f, --force', 're-fetch tables already on disk')
 		.option('-q, --quiet', 'suppress progress output');
 }
@@ -244,6 +246,10 @@ async function extractStage(session: Session, options: CommonOptions) {
 		...(session.filter ? { tableFilter: session.filter } : {}),
 		concurrency: session.concurrency,
 		force: session.force,
+		// Commander maps --no-exact-rows to exactRows: false.
+		exactRowCounts: (options as unknown as { exactRows?: boolean }).exactRows !== false,
+		countBudgetBytes: parseBytes(options.countBudget ?? '20GB'),
+		budget: session.budget,
 	});
 }
 

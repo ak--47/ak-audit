@@ -46,6 +46,8 @@ export interface ScanPlan {
 	detail: string;
 	whereClause?: string;
 	tablesamplePercent?: number;
+	/** The table demands a filter that could not be built; do not query it. */
+	unfilterable?: boolean;
 }
 
 /**
@@ -121,7 +123,18 @@ export interface PlanScanOptions {
 	lookback?: number;
 	/** Profile the whole table regardless of size. */
 	full?: boolean;
+	/**
+	 * The table rejects any query without a partition filter.
+	 *
+	 * This is a hard constraint rather than a cost concern: BigQuery refuses
+	 * the query outright. If no predicate can be built, the table cannot be
+	 * profiled at all and must be skipped.
+	 */
+	requirePartitionFilter?: boolean;
 }
+
+/** Returned when a table demands a filter that cannot be constructed. */
+export const UNFILTERABLE = 'requires a partition filter, but no populated partition was found';
 
 /**
  * Chooses how much of a table to read.
@@ -133,8 +146,10 @@ export interface PlanScanOptions {
 export function planScan(options: PlanScanOptions): ScanPlan {
 	const { partitioning, partitions, rowCount, full } = options;
 	const lookback = options.lookback ?? DEFAULT_PARTITION_LOOKBACK;
+	const mustFilter = Boolean(options.requirePartitionFilter);
 
-	if (full) return { strategy: 'full', detail: 'full table scan (--full)' };
+	// `--full` cannot override a table that refuses unfiltered queries.
+	if (full && !mustFilter) return { strategy: 'full', detail: 'full table scan (--full)' };
 
 	const populated = partitions.filter((p) => p.rows > 0 && !isSpecialPartition(p.partitionId));
 
@@ -162,6 +177,10 @@ export function planScan(options: PlanScanOptions): ScanPlan {
 			};
 		}
 	}
+
+	// Every remaining strategy runs without a predicate, which this table
+	// would reject. Say so plainly rather than emitting a query that fails.
+	if (mustFilter) return { strategy: 'partitions', detail: UNFILTERABLE, unfilterable: true };
 
 	if (rowCount !== null && rowCount > SAMPLE_THRESHOLD_ROWS) {
 		// Keep the sample near a fixed row count rather than a fixed

@@ -53,6 +53,27 @@ export interface PartitioningConfig {
 	kind: 'time' | 'ingestion-time' | 'range';
 }
 
+/**
+ * Where a row count came from.
+ *
+ * This is recorded because not all row counts are equally trustworthy, and
+ * the difference is invisible once the number is written down. The
+ * `__TABLES__`-style metadata views report 0 rows for every view, which
+ * makes live views look dead. Anything reading this output needs to know
+ * whether a count was measured or merely reported.
+ */
+export type RowCountSource =
+	/** Exact, from the table's own metadata. Free. Base tables only. */
+	| 'table-metadata'
+	/** Exact, summed from per-partition counts. Free. */
+	| 'partitions'
+	/** Exact, from a real COUNT(*). Costs a scan on views. */
+	| 'count-query'
+	/** From region-level storage metadata. Absent for views. */
+	| 'storage-metadata'
+	/** No count could be obtained. */
+	| 'unavailable';
+
 /** Stage 1 output: one file per table under `raw/`. */
 export interface TableMeta {
 	project: string;
@@ -62,7 +83,17 @@ export interface TableMeta {
 	fullName: string;
 	kind: TableKind;
 	rowCount: number | null;
+	/** How `rowCount` was obtained, so a reader can judge it. */
+	rowCountSource: RowCountSource;
 	bytes: number | null;
+	/**
+	 * True when the table rejects any query lacking a partition filter.
+	 *
+	 * Measured on a 47 TB ingestion-time-partitioned table: without a filter
+	 * BigQuery refuses the query outright rather than merely charging for
+	 * it, so this must gate profiling, sampling, and counting alike.
+	 */
+	requirePartitionFilter: boolean;
 	created: string | null;
 	lastModified: string | null;
 	partitioning: PartitioningConfig | null;

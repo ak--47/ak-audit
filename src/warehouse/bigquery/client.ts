@@ -24,6 +24,16 @@ export interface QueryResult<T = Record<string, unknown>> {
 	cacheHit: boolean;
 }
 
+/** Facts a table reports about itself, free of charge. */
+export interface TableFacts {
+	/** Exact for base tables; absent for views. */
+	numRows: number | null;
+	numBytes: number | null;
+	requirePartitionFilter: boolean;
+	created: string | null;
+	lastModified: string | null;
+}
+
 export function estimateCostUsd(bytes: number): number {
 	return (bytes / 1024 ** 4) * USD_PER_TIB;
 }
@@ -127,6 +137,37 @@ export class BigQueryClient {
 			rows: rows as T[],
 			bytesProcessed: bytes,
 			cacheHit: Boolean(stats?.cacheHit),
+		};
+	}
+
+	/**
+	 * Reads a table's own metadata.
+	 *
+	 * This is a free API call that needs only dataset-level access, unlike
+	 * the region-level `TABLE_STORAGE` view, which requires project-level
+	 * permission that a reader often does not have. For base tables it
+	 * carries an exact row count; for views it carries none, which is
+	 * precisely the gap that makes live views look empty.
+	 */
+	async tableMetadata(dataset: string, table: string): Promise<TableFacts> {
+		const [meta] = await this.bq.dataset(dataset).table(table).getMetadata();
+		const toNum = (v: unknown) => {
+			if (v === null || v === undefined) return null;
+			const n = Number(v);
+			return Number.isFinite(n) ? n : null;
+		};
+		const toIso = (ms: unknown) => {
+			const n = Number(ms);
+			return Number.isFinite(n) && n > 0 ? new Date(n).toISOString() : null;
+		};
+		return {
+			numRows: toNum(meta.numRows),
+			numBytes: toNum(meta.numBytes),
+			requirePartitionFilter: Boolean(
+				meta.requirePartitionFilter ?? meta.timePartitioning?.requirePartitionFilter,
+			),
+			created: toIso(meta.creationTime),
+			lastModified: toIso(meta.lastModifiedTime),
 		};
 	}
 

@@ -59,7 +59,7 @@ export function renderCatalog(
 		const short = meta?.table ?? t.table;
 		lines.push(
 			`| [${short}](tables/${short}.md) | ${t.kind} | ${num(t.rowCount)} | ` +
-				`${bytes(t.bytes)} | ${t.columnCount} | ` +
+				`${meta?.rowCountSource ?? '—'} | ${bytes(t.bytes)} | ${t.columnCount} | ` +
 				`${escapeCell(t.keyColumns.slice(0, 3).join(', ')) || '—'} | ` +
 				`${t.relatedTables.length} |`,
 		);
@@ -158,7 +158,7 @@ export function renderTablePage(input: TablePageInput): string {
 		'',
 		`\`${meta.fullName}\` — ${meta.kind}`,
 		'',
-		`- Rows: ${num(meta.rowCount)}`,
+		`- Rows: ${num(meta.rowCount)} (${meta.rowCountSource})`,
 		`- Size: ${bytes(meta.bytes)}`,
 		`- Columns: ${analysis.columnCount}`,
 		`- Last modified: ${meta.lastModified ?? '—'}`,

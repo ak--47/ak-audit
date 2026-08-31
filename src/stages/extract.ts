@@ -12,7 +12,7 @@
 
 import { join } from 'node:path';
 import type { TableMeta } from '../types.ts';
-import type { BigQueryClient } from '../warehouse/bigquery/client.ts';
+import { formatBytes, type BigQueryClient, type TableFacts } from '../warehouse/bigquery/client.ts';
 import {
 	derivePartitioning,
 	fetchLineage,
@@ -20,6 +20,7 @@ import {
 	fetchSchemas,
 	fetchStorage,
 	listTables,
+	resolveRowCount,
 } from '../warehouse/bigquery/metadata.ts';
 import { quotePath } from '../warehouse/bigquery/profileSql.ts';
 import {
@@ -30,6 +31,7 @@ import {
 	safeFileName,
 	writeJson,
 } from '../output/writers.ts';
+import type { BudgetTracker } from '../warehouse/bigquery/budget.ts';
 import { mapWithConcurrency } from '../util/concurrency.ts';
 import { log } from '../util/log.ts';
 
@@ -41,6 +43,19 @@ export interface ExtractOptions {
 	tableFilter?: (name: string) => boolean;
 	concurrency: number;
 	force: boolean;
+	/** Run a real COUNT(*) where no free source can give an exact count. */
+	exactRowCounts: boolean;
+	/** Ceiling on what one exact count may scan. */
+	countBudgetBytes?: number;
+	/**
+	 * Run-wide spend tracker.
+	 *
+	 * Extraction is nearly free, but the two things in it that can cost
+	 * anything -- an exact count over a view, and sampling a view -- scale
+	 * with table count. Across hundreds of views that is no longer noise, so
+	 * they draw from the same budget the profile stage does.
+	 */
+	budget?: BudgetTracker;
 }
 
 export interface ExtractResult {
@@ -85,8 +100,31 @@ export async function runExtract(options: ExtractOptions): Promise<ExtractResult
 
 		const fields = schemas.get(entry.name) ?? [];
 		const store = storage.get(entry.name);
+		const tablePartitions = partitions.get(entry.name) ?? [];
 		const { partitioning, clustering } = derivePartitioning(fields, entry.ddl);
 		const errors: string[] = [];
+
+		// The table's own metadata needs only dataset-level access, unlike
+		// the region-level storage view, so this is often the only source of
+		// row counts available at all.
+		let facts: TableFacts | null = null;
+		try {
+			facts = await client.tableMetadata(dataset, entry.name);
+		} catch (error) {
+			errors.push(`table metadata unavailable: ${message(error)}`);
+		}
+
+		const counted = await resolveRowCount(client, {
+			fullName: `${client.project}.${dataset}.${entry.name}`,
+			kind: entry.kind,
+			partitions: tablePartitions,
+			facts,
+			storageRows: store?.rowCount ?? null,
+			skipCountQuery: !options.exactRowCounts,
+			countBudgetBytes: options.countBudgetBytes,
+			budget: options.budget,
+		});
+		if (counted.error) errors.push(counted.error);
 
 		const isView = entry.kind === 'VIEW' || entry.kind === 'MATERIALIZED_VIEW';
 		let references: string[] = [];
@@ -107,6 +145,8 @@ export async function runExtract(options: ExtractOptions): Promise<ExtractResult
 			entry.name,
 			isView,
 			options.sampleRows,
+			options.countBudgetBytes,
+			options.budget,
 		);
 		if (error) errors.push(error);
 
@@ -116,13 +156,15 @@ export async function runExtract(options: ExtractOptions): Promise<ExtractResult
 			table: entry.name,
 			fullName: `${client.project}.${dataset}.${entry.name}`,
 			kind: entry.kind,
-			rowCount: store?.rowCount ?? null,
-			bytes: store?.bytes ?? null,
-			created: store?.created ?? entry.created,
-			lastModified: store?.lastModified ?? null,
+			rowCount: counted.rowCount,
+			rowCountSource: counted.source,
+			bytes: facts?.numBytes ?? store?.bytes ?? null,
+			requirePartitionFilter: facts?.requirePartitionFilter ?? false,
+			created: facts?.created ?? store?.created ?? entry.created,
+			lastModified: facts?.lastModified ?? store?.lastModified ?? null,
 			partitioning,
 			clustering,
-			partitions: partitions.get(entry.name) ?? [],
+			partitions: tablePartitions,
 			ddl: entry.ddl,
 			description: null,
 			schema: fields,
@@ -156,6 +198,8 @@ async function fetchSamples(
 	table: string,
 	isView: boolean,
 	limit: number,
+	budgetBytes = 20 * 1024 ** 3,
+	budget?: BudgetTracker,
 ): Promise<{ samples: Record<string, unknown>[]; source: 'rest' | 'query' | 'none'; error?: string }> {
 	if (!isView) {
 		try {
@@ -168,7 +212,23 @@ async function fetchSamples(
 
 	const sql = `SELECT * FROM ${quotePath(`${client.project}.${dataset}.${table}`)} LIMIT ${limit}`;
 	try {
-		const { rows } = await client.query(sql);
+		// A LIMIT does not bound what a view scans: the view's own query runs
+		// first, and one over a 47 TB table costs the same twenty rows or not.
+		// Extraction is meant to be nearly free, so price this before running it.
+		const estimate = await client.dryRun(sql);
+		const decision = budget?.check(table, estimate);
+		if (decision && !decision.allowed) {
+			return { samples: [], source: 'none', error: `view sampling skipped: ${decision.reason}` };
+		}
+		if (estimate > budgetBytes) {
+			return {
+				samples: [],
+				source: 'none',
+				error: `view sampling skipped: would scan ${formatBytes(estimate)}`,
+			};
+		}
+		const { rows, bytesProcessed } = await client.query(sql);
+		budget?.record(bytesProcessed);
 		return { samples: rows.map((r) => plainValue(r) as Record<string, unknown>), source: 'query' };
 	} catch (error) {
 		return { samples: [], source: 'none', error: `view sampling failed: ${message(error)}` };

@@ -17,6 +17,8 @@ export interface CommonOptions {
 	force?: boolean;
 	quiet?: boolean;
 	noProfile?: boolean;
+	exactRows?: boolean;
+	countBudget?: string;
 	estimate?: boolean;
 	full?: boolean;
 }
