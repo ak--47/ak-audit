@@ -102,8 +102,14 @@ export interface TableMeta {
 	ddl: string | null;
 	/** Hand-written table description, the richest free context available. */
 	description: string | null;
-	/** Table labels, e.g. owner or domain tags. */
-	labels: Record<string, string>;
+	/**
+	 * Table labels, e.g. owner or domain tags.
+	 *
+	 * Optional because a raw file written before this field existed does not
+	 * carry it. Every stage reads its input from disk, so the types describe
+	 * what a file may contain, not what the current writer happens to emit.
+	 */
+	labels?: Record<string, string>;
 	schema: SchemaField[];
 	/** Exact upstream tables, from dry-run `referencedTables`. Views only. */
 	references: string[];

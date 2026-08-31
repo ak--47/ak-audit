@@ -207,23 +207,23 @@ export function renderOverview(
 			);
 		}
 		lines.push('');
-		if (usage.absentTables.length > 0) {
+		if ((usage.absentTables ?? []).length > 0) {
 			lines.push(
-				`### Queried but no longer here (${usage.absentTables.length})`,
+				`### Queried but no longer here (${(usage.absentTables ?? []).length})`,
 				'',
 				'These names were read during the window and are not in the dataset now.',
 				'Either they were dropped, or something still queries a table that has',
 				'moved.',
 				'',
-				usage.absentTables.map((t) => `\`${t}\``).join(', '),
+				(usage.absentTables ?? []).map((t) => `\`${t}\``).join(', '),
 				'',
 			);
 		}
-		if (usage.unusedTables.length > 0) {
+		if ((usage.unusedTables ?? []).length > 0) {
 			lines.push(
-				`### Not read by anyone in ${usage.windowDays} days (${usage.unusedTables.length})`,
+				`### Not read by anyone in ${usage.windowDays} days (${(usage.unusedTables ?? []).length})`,
 				'',
-				usage.unusedTables.map((t) => `\`${t}\``).join(', '),
+				(usage.unusedTables ?? []).map((t) => `\`${t}\``).join(', '),
 				'',
 			);
 		}
@@ -276,10 +276,13 @@ export function renderTablePage(input: TablePageInput): string {
 	// The description is hand-written context and the single most useful
 	// thing on the page, so it leads rather than trails the statistics.
 	if (meta.description) lines.push(`> ${meta.description.replaceAll('\n', '\n> ')}`, '');
-	if (Object.keys(meta.labels).length > 0) {
+	// A raw file written by an older run has no `labels` key at all. Reading
+	// stage output is a contract with the disk, not with the current types.
+	const labels = meta.labels ?? {};
+	if (Object.keys(labels).length > 0) {
 		lines.push(
 			'Labels: ' +
-				Object.entries(meta.labels)
+				Object.entries(labels)
 					.map(([k, v]) => `\`${k}=${v}\``)
 					.join(', '),
 			'',

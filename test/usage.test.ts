@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPseudoTable, mentionsTable } from '../src/warehouse/bigquery/usage.ts';
+import { isPseudoTable, isSelfJob, mentionsTable } from '../src/warehouse/bigquery/usage.ts';
 
 describe('mentionsTable', () => {
 	it('finds a view referenced with its dataset prefix', () => {
@@ -49,5 +49,32 @@ describe('isPseudoTable', () => {
 	it('keeps a real table whose name merely starts with an underscore', () => {
 		expect(isPseudoTable('_staging_accounts')).toBe(false);
 		expect(isPseudoTable('dim_accounts')).toBe(false);
+	});
+});
+
+describe('isSelfJob', () => {
+	it('recognises a labelled job', () => {
+		expect(isSelfJob({ labels: [{ key: 'ak-audit', value: 'true' }], query: 'SELECT 1' })).toBe(
+			true,
+		);
+	});
+
+	it('recognises an unlabelled profiling query by its alias', () => {
+		// History predating the label carries no labels, so the generated SQL
+		// is the only signal. `_akt` is this tool's table alias.
+		const sql =
+			'SELECT COUNT(*) AS row_count, COUNTIF(_akt.`account_name` IS NULL) AS c0_nullct ' +
+			'FROM `p.d.t` AS _akt';
+		expect(isSelfJob({ labels: null, query: sql })).toBe(true);
+	});
+
+	it('leaves a real user query alone', () => {
+		expect(
+			isSelfJob({ labels: [], query: 'SELECT account_name FROM `p.d.dim_accounts` LIMIT 10' }),
+		).toBe(false);
+	});
+
+	it('does not trip on a column that merely contains the alias text', () => {
+		expect(isSelfJob({ labels: null, query: 'SELECT market FROM t' })).toBe(false);
 	});
 });

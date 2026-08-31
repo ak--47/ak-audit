@@ -51,6 +51,7 @@ export interface JobRow {
 	statement_type: string | null;
 	query: string | null;
 	referenced_tables: { project_id: string; dataset_id: string; table_id: string }[] | null;
+	labels: { key: string; value: string }[] | null;
 }
 
 export interface UsageQueryExample {
@@ -109,10 +110,17 @@ export interface UsageResult {
 	bytesProcessed: number;
 	tables: Record<string, TableUsage>;
 	topUsers: { user: string; queries: number }[];
+	/** Jobs dropped because ak-audit ran them itself. */
+	selfJobsExcluded?: number;
 	/** Tables in the dataset that no job touched in the window. */
 	unusedTables: string[];
-	/** Names queried in the window that are no longer in the dataset. */
-	absentTables: string[];
+	/**
+	 * Names queried in the window that are no longer in the dataset.
+	 *
+	 * Optional for the same reason as `TableMeta.labels`: a usage.json from an
+	 * earlier run has no such key, and every consumer reads from disk.
+	 */
+	absentTables?: string[];
 	truncated: boolean;
 	note: string;
 }
@@ -140,7 +148,8 @@ SELECT
   cache_hit,
   statement_type,
   SUBSTR(query, 1, ${MAX_QUERY_CHARS}) AS query,
-  referenced_tables
+  referenced_tables,
+  labels
 FROM \`${project}\`.\`${regionName(location)}\`.INFORMATION_SCHEMA.JOBS_BY_${scope}
 WHERE creation_time > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${days} DAY)
   AND job_type = 'QUERY'
@@ -188,6 +197,25 @@ export function mentionsTable(sql: string | null, table: string): boolean {
 	return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`).test(sql);
 }
 
+/**
+ * Whether a job was run by ak-audit itself.
+ *
+ * Auditing a dataset means querying most of its tables, so without this the
+ * tool reads its own profiling traffic back and reports it as usage. On one
+ * real dataset that turned "nobody but me has touched this" into "236 of 330
+ * tables read", which is the opposite of the truth.
+ *
+ * Jobs carry a label from now on. Older history has none, so the generated
+ * SQL is matched instead: `_akt` is the alias this tool prefixes every column
+ * reference with, and it exists precisely because no hand-written query
+ * would use it.
+ */
+export function isSelfJob(row: Pick<JobRow, 'labels' | 'query'>): boolean {
+	if ((row.labels ?? []).some((l) => l?.key === 'ak-audit')) return true;
+	const sql = row.query ?? '';
+	return sql.includes('_akt.`') || sql.includes('AS _akt') || sql.includes('_akt_sketch');
+}
+
 export interface FetchUsageOptions {
 	client: BigQueryClient;
 	dataset: string;
@@ -224,6 +252,7 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 		topUsers: [],
 		unusedTables: [],
 		absentTables: [],
+		selfJobsExcluded: 0,
 		truncated: false,
 		note,
 	});
@@ -272,7 +301,14 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 	const userTotals = new Map<string, number>();
 	const coCounts = new Map<string, Map<string, number>>();
 
+	let selfJobsExcluded = 0;
 	for (const row of rows) {
+		// The tool's own profiling reads every table it profiles. Counting
+		// that would make any audited dataset look busy.
+		if (isSelfJob(row)) {
+			selfJobsExcluded++;
+			continue;
+		}
 		// INFORMATION_SCHEMA views appear as referenced tables but are not
 		// part of the dataset's contents.
 		const refs = (row.referenced_tables ?? []).filter(
@@ -376,7 +412,8 @@ export async function fetchUsage(options: FetchUsageOptions): Promise<UsageResul
 	return {
 		scope,
 		windowDays: days,
-		jobsSeen: rows.length,
+		jobsSeen: rows.length - selfJobsExcluded,
+		selfJobsExcluded,
 		bytesProcessed,
 		tables: Object.fromEntries(tables),
 		topUsers: [...userTotals.entries()]

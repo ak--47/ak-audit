@@ -50,6 +50,14 @@ export function formatBytes(bytes: number): string {
 	return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`;
 }
 
+/**
+ * Labels attached to every job ak-audit submits.
+ *
+ * BigQuery records these in INFORMATION_SCHEMA.JOBS, which makes them the
+ * exact way to exclude the tool's own traffic from a usage read.
+ */
+export const JOB_LABELS: Record<string, string> = { 'ak-audit': 'true' };
+
 export class BigQueryClient {
 	readonly project: string;
 	location: string | undefined;
@@ -128,6 +136,10 @@ export class BigQueryClient {
 			query: sql,
 			location: this.location,
 			useLegacySql: false,
+			// Stamps every job this tool runs, so a later usage read can tell
+			// its own profiling traffic apart from what people actually run.
+			// Without this, auditing a dataset makes it look well used.
+			labels: { ...JOB_LABELS },
 		});
 		const [rows] = await job.getQueryResults();
 		const stats = job.metadata?.statistics?.query;

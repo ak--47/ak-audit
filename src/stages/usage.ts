@@ -60,10 +60,12 @@ export async function runUsage(options: UsageStageOptions): Promise<UsageResult>
 	if (usage.unusedTables.length > 0) {
 		log.info(`${usage.unusedTables.length} table(s) not read by anyone in the window`);
 	}
-	if (usage.absentTables.length > 0) {
-		log.info(
-			`${usage.absentTables.length} name(s) queried in the window are no longer in the dataset`,
-		);
+	if (usage.selfJobsExcluded) {
+		log.detail(`${usage.selfJobsExcluded.toLocaleString()} of ak-audit's own jobs excluded`);
+	}
+	const absent = usage.absentTables ?? [];
+	if (absent.length > 0) {
+		log.info(`${absent.length} name(s) queried in the window are no longer in the dataset`);
 	}
 	if (usage.truncated) log.warn('job list hit its row cap; counts are a lower bound');
 
